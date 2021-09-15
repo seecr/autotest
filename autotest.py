@@ -28,9 +28,9 @@ import pathlib
 import tempfile
 import shutil
 import sys
-import pdb
-import traceback
 import operator
+import functools
+import io
 
 
 __all__ = ['test', 'fixture', 'fail'] # fixtures need not importing; some magic after all...
@@ -42,23 +42,37 @@ fixtures = {}
 
 class Test:
 
-    def __call__(s, t):
+    _skip = False
+
+    def __call__(self, f=None, **kws):
         """Decorator to define, run and report a test"""
-        print(f"{t.__module__}  {t.__name__}  ", end='', flush=True)
-        fxs = get_fixtures(t)
+        if kws:
+            return functools.partial(self.decorate, **kws)
+        return self.decorate(f)
+
+    def decorate(self, f, keep=False, silent=False):
+        if self._skip:
+            return
+        if not silent:
+            print(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
+        fxs = get_fixtures(f)
         try:
-            t(*(fx[2] for fx in fxs))
+            f(*(fx[2] for fx in fxs))
         except BaseException:
             e, v, tb = sys.exc_info()
-            print()
+            if not silent:
+                print()
             if v.args == ():
-                pdb.post_mortem(tb)
+                post_mortem(tb)
                 exit(-1)
             else:
                 raise
         finally:
             finalize_fixtures(fxs)
-        print("OK")
+        if not silent:
+            print("OK")
+        if keep:
+            return f
 
 
     class Op:
@@ -78,7 +92,19 @@ class Test:
         return Test.Op(op)
 
 
+    def skip(self, t=True):
+        self._skip = t
+
+
 test = Test()
+
+
+def post_mortem(tb):
+    import pdb
+    p = pdb.Pdb()
+    p.rcLines.extend(['longlist'])
+    p.reset()
+    p.interaction(None, tb)
 
 
 def fail(*args):
@@ -269,7 +295,7 @@ def new_assert():
 def test_testop_has_args():
 
     try:
-        @test
+        @test(silent=True)
         def nested_test_with_testop():
             x = 42
             y = 67
@@ -277,3 +303,57 @@ def test_testop_has_args():
     except AssertionError as e:
         test.eq("('eq', 42, 67)", str(e))
 
+@test
+def skip_until():
+    test.skip()
+    @test
+    def fails():
+        test.eq(1, 2)
+    test.skip(False)
+    try:
+        @test(silent=True)
+        def fails():
+            test.gt(1, 2)
+        fail()
+    except AssertionError as e:
+        test.eq("('gt', 1, 2)", str(e))
+
+@test
+def test_calls_other_test():
+    @test(keep=True, silent=True)
+    def test_a():
+        assert 1 == 1
+        return True
+    @test(silent=True)
+    def test_b():
+        assert test_a()
+
+@fixture
+def stderr(): # need to extend this for child processes, see seecr-test
+    o = io.StringIO()
+    sys.stderr = o
+    try:
+        yield o
+    finally:
+        sys.stderr = sys.__stderr__
+
+@fixture
+def stdout(): # need to extend this for child processes, see seecr-test
+    o = io.StringIO()
+    sys.stdout = o
+    try:
+        yield o
+    finally:
+        sys.stdout = sys.__stdout__
+
+@test
+def stdout_capture():
+    name = "Erik"
+    msgs = []
+    @test(silent=True)
+    def capture_all(stdout, stderr):
+        print(f"Hello {name}!", file=sys.stdout)
+        print(f"Bye {name}!", file=sys.stderr)
+        msgs.extend([stdout.getvalue(), stderr.getvalue()])
+    assert "Hello Erik!\n" == msgs[0]
+    assert "Bye Erik!\n" == msgs[1]
