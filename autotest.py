@@ -31,6 +31,7 @@ import sys
 import operator
 import functools
 import io
+import asyncio
 
 
 __all__ = ['test', 'fixture', 'fail'] # fixtures need not importing; some magic after all...
@@ -57,7 +58,11 @@ class Test:
             print(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
         fxs = get_fixtures(f)
         try:
-            f(*(fx[2] for fx in fxs))
+            args = (fx[2] for fx in fxs)
+            if inspect.iscoroutinefunction(f):
+                asyncio.run(f(*args), debug=True)
+            else:
+                f(*args)
         except BaseException:
             e, v, tb = sys.exc_info()
             if not silent:
@@ -357,3 +362,9 @@ def stdout_capture():
         msgs.extend([stdout.getvalue(), stderr.getvalue()])
     assert "Hello Erik!\n" == msgs[0]
     assert "Bye Erik!\n" == msgs[1]
+
+
+@test
+async def async_function():
+    await asyncio.sleep(0)
+    assert True
