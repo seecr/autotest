@@ -37,68 +37,68 @@ import asyncio
 __all__ = ['test', 'fixture', 'fail'] # fixtures need not importing; some magic after all...
 
 
+sys_defaults = {
+    'silent' : False
+}
+
+
 # hold al fixtures found during import (global)
 fixtures = {}
 
 
+def _decorate(f, keep=False, silent=False, skip=False):
+    if skip:
+        return
+    if not silent:
+        print(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
+    fxs = get_fixtures(f)
+    try:
+        args = (fx[2] for fx in fxs)
+        if inspect.iscoroutinefunction(f):
+            asyncio.run(f(*args), debug=True)
+        else:
+            f(*args)
+    except BaseException:
+        e, v, tb = sys.exc_info()
+        if not silent:
+            print()
+        if v.args == ():
+            post_mortem(tb)
+            exit(-1)
+        else:
+            raise
+    finally:
+        finalize_fixtures(fxs)
+    if not silent:
+        print("OK")
+    if keep:
+        return f
+
+
 class Test:
 
-    _skip = False
+    defaults = {**sys_defaults}
 
     def __call__(self, f=None, **kws):
         """Decorator to define, run and report a test"""
         if kws:
-            return functools.partial(self.decorate, **kws)
-        return self.decorate(f)
-
-    def decorate(self, f, keep=False, silent=False):
-        if self._skip:
-            return
-        if not silent:
-            print(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
-        fxs = get_fixtures(f)
-        try:
-            args = (fx[2] for fx in fxs)
-            if inspect.iscoroutinefunction(f):
-                asyncio.run(f(*args), debug=True)
-            else:
-                f(*args)
-        except BaseException:
-            e, v, tb = sys.exc_info()
-            if not silent:
-                print()
-            if v.args == ():
-                post_mortem(tb)
-                exit(-1)
-            else:
-                raise
-        finally:
-            finalize_fixtures(fxs)
-        if not silent:
-            print("OK")
-        if keep:
-            return f
+            opts = {**self.defaults, **kws}
+            return functools.partial(_decorate, **opts)
+        return _decorate(f, **self.defaults)
 
 
-    class Op:
-        """ Represents operators in test.eq etc. """
-        def __init__(self, op):
-            self._op = op
-
-        def __call__(self, *args):
-            if not bool(self._op(*args)):
-                raise AssertionError(self._op.__name__, *args)
-            return True
+    def default(self, **kws):
+        self.defaults.update(kws)
 
 
     def __getattr__(self, name):
         """ test.eq(lhs, rhs) etc, any operator from module 'operator' really. """
         op = getattr(operator, name)
-        return Test.Op(op)
-
-
-    def skip(self, t=True):
-        self._skip = t
+        def call(*args):
+            if not bool(op(*args)):
+                raise AssertionError(op.__name__, *args)
+            return True
+        return call
 
 
 test = Test()
@@ -310,11 +310,11 @@ def test_testop_has_args():
 
 @test
 def skip_until():
-    test.skip()
+    test.default(skip=True)
     @test
     def fails():
         test.eq(1, 2)
-    test.skip(False)
+    test.default(skip=False)
     try:
         @test(silent=True)
         def fails():
