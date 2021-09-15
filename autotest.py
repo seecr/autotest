@@ -34,7 +34,7 @@ import io
 import asyncio
 
 
-__all__ = ['test', 'fixture', 'fail'] # fixtures need not importing; some magic after all...
+__all__ = ['test', 'fixture', 'fail', 'Runner']
 
 
 sys_defaults = {
@@ -43,41 +43,39 @@ sys_defaults = {
 
 
 # hold al fixtures found during import (global)
+# TODO move to Runner, together with def fixture
 fixtures = {}
 
 
 def _decorate(f, keep=False, silent=False, skip=False):
     if skip:
         return
-    if not silent:
-        print(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
+    print_msg = print if not silent else lambda *a, **k: None
+    print_msg(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
     fxs = get_fixtures(f)
+    args = (fx[2] for fx in fxs)
     try:
-        args = (fx[2] for fx in fxs)
         if inspect.iscoroutinefunction(f):
             asyncio.run(f(*args), debug=True)
         else:
             f(*args)
-    except BaseException:
-        e, v, tb = sys.exc_info()
-        if not silent:
-            print()
-        if v.args == ():
-            post_mortem(tb)
+    except BaseException as e:
+        print_msg()
+        if e.args == ():
+            post_mortem(sys.last_traceback)
             exit(-1)
-        else:
-            raise
+        raise
     finally:
         finalize_fixtures(fxs)
-    if not silent:
-        print("OK")
-    if keep:
-        return f
+    print_msg("OK")
+    return f if keep else None
 
 
-class Test:
+class Runner:
 
-    defaults = {**sys_defaults}
+    def __init__(self, opts):
+        self.defaults = {**opts}
+
 
     def __call__(self, f=None, **kws):
         """Decorator to define, run and report a test"""
@@ -101,7 +99,7 @@ class Test:
         return call
 
 
-test = Test()
+test = Runner(sys_defaults)
 
 
 def post_mortem(tb):
@@ -368,3 +366,8 @@ def stdout_capture():
 async def async_function():
     await asyncio.sleep(0)
     assert True
+
+
+@test
+def assert_raises_like():
+    fail("weiter")
