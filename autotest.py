@@ -48,10 +48,11 @@ fixtures = {}
 
 
 def _decorate(f, keep=False, silent=False, skip=False):
-    if skip:
-        return
     print_msg = print if not silent else lambda *a, **k: None
     print_msg(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
+    if skip:
+        print_msg("SKIPPED")
+        return
     fxs = get_fixtures(f)
     args = (fx[2] for fx in fxs)
     try:
@@ -368,6 +369,6 @@ async def async_function():
     assert True
 
 
-@test
+@test(skip=True)
 def assert_raises_like():
     fail("weiter")
