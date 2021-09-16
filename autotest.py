@@ -36,7 +36,7 @@ import multiprocessing
 import os
 
 
-__all__ = ['test', 'fixture', 'fail', 'Runner']
+__all__ = ['test', 'Runner']
 
 
 sys_defaults = {
@@ -49,51 +49,44 @@ sys_defaults = {
 }
 
 
-# hold al fixtures found during import (global)
-# TODO move to Runner, together with def fixture
-fixtures = {}
-
-
-def _decorate(f, keep=False, silent=False, skip=False):
-    if skip:
-        return
-    print_msg = print if not silent else lambda *a, **k: None
-    print_msg(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
-    fxs = get_fixtures(f)
-    args = (fx[2] for fx in fxs)
-    try:
-        if inspect.iscoroutinefunction(f):
-            asyncio.run(f(*args), debug=True)
-        else:
-            f(*args)
-    except BaseException as e:
-        print_msg()
-        if e.args == ():
-            post_mortem(sys.last_traceback)
-            exit(-1)
-        raise
-    finally:
-        finalize_fixtures(fxs)
-    print_msg("OK")
-    return f if keep else None
 
 
 class Runner:
 
-    def __init__(self, opts):
-        self.defaults = {**opts}
+    def __init__(self, **opts):
+        self.defaults = opts
+        self.fixtures = {}
+        self.finalize_early = []
 
 
-    def __call__(self, f=None, **kws):
+    def __call__(self, f=None, **opts):
         """Decorator to define, run and report a test"""
-        if kws:
-            opts = {**self.defaults, **kws}
-            return functools.partial(_decorate, **opts)
-        return _decorate(f, **self.defaults)
+        if opts:
+            return functools.partial(self._run, **{**self.defaults, **opts})
+        return self._run(f, **self.defaults)
 
 
     def default(self, **kws):
+        """ Set default options for nexts tests."""
         self.defaults.update(kws)
+
+
+    def fail(self, *args):
+        if not self.defaults.get('skip', False):
+            raise AssertionError(*args)
+
+
+    def fixture(self, f):
+        """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
+           That value is used as argument to functions declaring the fixture in their args. """
+        assert inspect.isgeneratorfunction(f), f
+        self.fixtures[f.__name__] = f
+        return f
+
+
+    def early_finalize(self, fx):
+        """ Fixtures finalized before debugging (i.e. stdout)"""
+        self.finalize_early.append(fx)
 
 
     def __getattr__(self, name):
@@ -106,7 +99,41 @@ class Runner:
         return call
 
 
-test = Runner(sys_defaults)
+    def _get_fixtures(*_):
+        """ Return info about fixtures, recursively. Placeholder function during bootstrap. """
+        return []
+
+
+    def _run(self, f, keep=False, silent=False, skip=False):
+        if skip:
+            return
+        print_msg = print if not silent else lambda *a, **k: None
+        print_msg(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
+        fxs = self._get_fixtures(f)
+        args = (fx[2] for fx in fxs)
+        try:
+            if inspect.iscoroutinefunction(f):
+                asyncio.run(f(*args), debug=True)
+            else:
+                f(*args)
+        except BaseException as e:
+            _, _, tb = sys.exc_info()
+            print_msg()
+            if e.args == ():
+                for fx in self.finalize_early:
+                    list(fx)
+                post_mortem(tb)
+                exit(-1)
+            raise
+        finally:
+            finalize_fixtures(fxs)
+            del self.finalize_early[:]
+        print_msg("OK")
+        return f if keep else None
+
+
+
+test = Runner(**sys_defaults)
 
 
 def post_mortem(tb):
@@ -115,15 +142,6 @@ def post_mortem(tb):
     p.rcLines.extend(['longlist'])
     p.reset()
     p.interaction(None, tb)
-
-
-def fail(*args):
-    raise AssertionError(*args)
-
-
-def get_fixtures(_):
-    """ Return info about fixtures, recursively. Placeholder function during bootstrap. """
-    return []
 
 
 def finalize_fixtures(fxs):
@@ -159,62 +177,56 @@ def AnyNumber():
 
 
 
-def fixture(f):
-    """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
-       That value is used as argument to functions declaring the fixture in their args. """
-    assert inspect.isgeneratorfunction(f), f
-    fixtures[f.__name__] = f
-    return f
-
-
 """ bootstrapping: test and instal fixture support """
 @test
 def test_get_fixtures():
-    def _get_fixtures(f):
-        """ The real function, tested and then installed. Lambda is read as 'let'. """
-        return [(lambda fx=fixtures[name]:
-                    (lambda fxs=_get_fixtures(fx):
-                        (lambda gen=fx(*(x[2] for x in fxs)):
-                            (fxs, gen, next(gen)))())())() for name in inspect.signature(f).parameters]
+    class X(Runner):
+        def _get_fixtures(self, f):
+            """ The real function, tested and then installed. Lambda is read as 'let'. """
+            return [(lambda fx=self.fixtures[name]:
+                        (lambda fxs=self._get_fixtures(fx):
+                            (lambda gen=fx(*(x[2] for x in fxs)):
+                                (fxs, gen, next(gen)))())())() for name in inspect.signature(f).parameters]
+    x = X()
     def f(): pass
-    assert [] == _get_fixtures(f)
-    @fixture
+    assert [] == x._get_fixtures(f)
+    @x.fixture
     def a(): yield 7
-    @fixture
+    @x.fixture
     def b(): yield 9
     def f(a, b): pass
-    fxs, gen, v = _get_fixtures(f)[0]
+    fxs, gen, v = x._get_fixtures(f)[0]
     assert fxs == []
     assert inspect.isgenerator(gen)
     assert v == 7, v
-    fxs, gen, v = _get_fixtures(f)[1]
+    fxs, gen, v = x._get_fixtures(f)[1]
     assert fxs == []
     assert inspect.isgenerator(gen)
     assert v == 9, v
-    @fixture
+    @x.fixture
     def c(b): yield 13
     def f(c): pass
-    fxs, gen, v = _get_fixtures(f)[0]
+    fxs, gen, v = x._get_fixtures(f)[0]
     assert 1 == len(fxs), fxs
     assert inspect.isgenerator(gen)
     assert v == 13, v
     fxs, gen, v = fxs[0] # recursive
     assert fxs == []
     assert v == 9, v
-    @fixture
+    @x.fixture
     def d(c): yield 17
     def f(d): pass
-    gs = _get_fixtures(f)
+    gs = x._get_fixtures(f)
     fxs, gen, v = gs[0][0][0][0][0]
     assert [] == fxs
     assert inspect.isgenerator(gen)
     assert v == 9, v
     # everything OK, install it
-    global get_fixtures
-    get_fixtures = _get_fixtures
+    setattr(Runner, '_get_fixtures', X._get_fixtures)
+    #Runner._get_fixtures = _get_fixtures
 
 
-@fixture
+@test.fixture
 def tmp_path():
     p = pathlib.Path(tempfile.mkdtemp())
     yield p
@@ -224,21 +236,21 @@ def tmp_path():
 fixture_lifetime = []
 
 
-@fixture
+@test.fixture
 def fixture_A():
     fixture_lifetime.append('A-live')
     yield 42
     fixture_lifetime.append('A-close')
 
 
-@fixture
+@test.fixture
 def fixture_B(fixture_A):
     fixture_lifetime.append('B-live')
     yield fixture_A * 2
     fixture_lifetime.append('B-close')
 
 
-@fixture
+@test.fixture
 def fixture_C(fixture_B):
     fixture_lifetime.append('C-live')
     yield fixture_B * 3
@@ -291,13 +303,13 @@ def new_assert():
 
     try:
         test.eq(1, 2)
-        fail()
+        test.fail()
     except AssertionError as e:
         assert ('eq', 1, 2) == e.args, e.args
 
     try:
         test.ne(1, 1)
-        fail()
+        test.fail()
     except AssertionError as e:
         assert "('ne', 1, 1)" == str(e), str(e)
 
@@ -324,7 +336,7 @@ def skip_until():
         @test(silent=True)
         def fails():
             test.gt(1, 2)
-        fail()
+        test.fail()
     except AssertionError as e:
         test.eq("('gt', 1, 2)", str(e))
 
@@ -358,14 +370,18 @@ def capture(name):
         setattr(sys, name, org_stream)
 
 
-@fixture
+@test.fixture
 def stdout():
-    yield from capture('stdout')
+    g = capture('stdout')
+    test.early_finalize(g)
+    yield from g
 
 
-@fixture
+@test.fixture
 def stderr():
-    yield from capture('stderr')
+    g = capture('stderr')
+    test.early_finalize(g)
+    yield from g
 
 
 #@test
@@ -408,26 +424,36 @@ def assert_raises_like():
 def child():
     @test
     def in_child():
-        print("I am a happy child")
+        print("I am a happy child", flush=True)
         assert 1 == 1
 
 
-if multiprocessing.current_process().name == "MainProcess": # avoid recursive processes
+if multiprocessing.current_process().name == "MainProcess":
     @test
     def silence_child_processes(stdout):
         ctx = multiprocessing.get_context('spawn')
         p = ctx.Process(target=child)
         p.start()
         p.join()
-        test.eq("I am a happy child\n", stdout.getvalue())
+        out = stdout.getvalue()
+        test.contains(out, "I am a happy child")
+        test.not_("in_child" in out)
 
 
-if multiprocessing.current_process().name == "MainProcess": # don't confuse mp test above
     @test
     def import_submodule(stdout):
-        import sub_module
-        test.eq("sub_module  test_one  I am a happy submodule\nOK\n", stdout.getvalue())
+        import sub_module_ok
+        test.eq("sub_module_ok  test_one  I am a happy submodule\nOK\n", stdout.getvalue())
 
+    try:
+        @test
+        def import_submodule_is_silent_but_does_report_failures(stdout):
+            import sub_module_fail
+            test.eq("sub_module  test_one  I am a happy submodule\nOK\n", stdout.getvalue())
+        test.fail("Should have failed.")
+    except AssertionError as e:
+        assert "('eq', 123, 42)" == str(e), e
+        print()
 
 # we import ourselves to trigger running the test if/when you run autotest as main
 import autotest
