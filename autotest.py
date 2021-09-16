@@ -32,13 +32,20 @@ import operator
 import functools
 import io
 import asyncio
+import multiprocessing
+import os
 
 
 __all__ = ['test', 'fixture', 'fail', 'Runner']
 
 
 sys_defaults = {
-    'silent' : False
+    # avoid child processes to report, it does test however!
+    'silent': multiprocessing.current_process().name != "MainProcess",
+
+    # We run self-tests when imported, not when run as main program. This
+    # avoids tests run multiple times.
+    'skip' : __name__ == '__main__',
 }
 
 
@@ -48,11 +55,10 @@ fixtures = {}
 
 
 def _decorate(f, keep=False, silent=False, skip=False):
+    if skip:
+        return
     print_msg = print if not silent else lambda *a, **k: None
     print_msg(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
-    if skip:
-        print_msg("SKIPPED")
-        return
     fxs = get_fixtures(f)
     args = (fx[2] for fx in fxs)
     try:
@@ -332,25 +338,37 @@ def test_calls_other_test():
     def test_b():
         assert test_a()
 
-@fixture
-def stderr(): # need to extend this for child processes, see seecr-test
-    o = io.StringIO()
-    sys.stderr = o
+
+def capture(name):
+    """ captures output from child processes as well """
+    org_stream = getattr(sys, name)
+    org_fd = org_stream.fileno()
+    org_fd_backup = os.dup(org_fd)
+    replacement = tempfile.TemporaryFile(mode="w+t", buffering=1)
+    os.dup2(replacement.fileno(), org_fd)
+    def getvalue():
+        replacement.flush()
+        replacement.seek(0)
+        return replacement.read()
+    replacement.getvalue = getvalue
     try:
-        yield o
+        yield replacement
     finally:
-        sys.stderr = sys.__stderr__
+        os.dup2(org_fd_backup, org_fd)
+        setattr(sys, name, org_stream)
+
 
 @fixture
-def stdout(): # need to extend this for child processes, see seecr-test
-    o = io.StringIO()
-    sys.stdout = o
-    try:
-        yield o
-    finally:
-        sys.stdout = sys.__stdout__
+def stdout():
+    yield from capture('stdout')
 
-@test
+
+@fixture
+def stderr():
+    yield from capture('stderr')
+
+
+#@test
 def stdout_capture():
     name = "Erik"
     msgs = []
@@ -363,6 +381,19 @@ def stdout_capture():
     assert "Bye Erik!\n" == msgs[1]
 
 
+#@test
+def capture_stdout_child_processes(stdout):
+    def f():
+        @test(silent=True)
+        def in_child():
+            print("hier ben ik")
+            assert 1 == 1
+    p = multiprocessing.Process(target=f)
+    p.start()
+    p.join()
+    test.eq("hier ben ik\n", stdout.getvalue())
+
+
 @test
 async def async_function():
     await asyncio.sleep(0)
@@ -371,4 +402,32 @@ async def async_function():
 
 @test(skip=True)
 def assert_raises_like():
-    fail("weiter")
+    pass
+
+
+def child():
+    @test
+    def in_child():
+        print("I am a happy child")
+        assert 1 == 1
+
+
+if multiprocessing.current_process().name == "MainProcess": # avoid recursive processes
+    @test
+    def silence_child_processes(stdout):
+        ctx = multiprocessing.get_context('spawn')
+        p = ctx.Process(target=child)
+        p.start()
+        p.join()
+        test.eq("I am a happy child\n", stdout.getvalue())
+
+
+if multiprocessing.current_process().name == "MainProcess": # don't confuse mp test above
+    @test
+    def import_submodule(stdout):
+        import sub_module
+        test.eq("sub_module  test_one  I am a happy submodule\nOK\n", stdout.getvalue())
+
+
+# we import ourselves to trigger running the test if/when you run autotest as main
+import autotest
