@@ -40,12 +40,10 @@ __all__ = ['test', 'Runner']
 
 
 sys_defaults = {
-    # avoid child processes to report, it does test however!
-    'silent': multiprocessing.current_process().name != "MainProcess",
-
     # We run self-tests when imported, not when run as main program. This
     # avoids tests run multiple times.
-    'skip' : __name__ == '__main__',
+    # Also do not run tests when imported in a child, by multiprocessing
+    'skip' : __name__ == '__main__' or multiprocessing.current_process().name != "MainProcess",
 }
 
 
@@ -108,14 +106,14 @@ class Runner:
         if skip:
             return
         print_msg = print if not silent else lambda *a, **k: None
-        print_msg(f"{f.__module__}  {f.__name__}  ", end='', flush=True)
+        print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", end='', flush=True)
         fxs = self._get_fixtures(f)
         args = (fx[2] for fx in fxs)
         try:
             if inspect.iscoroutinefunction(f):
                 asyncio.run(f(*args), debug=True)
             else:
-                f(*args)
+                eval_with_unbound(f, *args)
         except BaseException as e:
             _, _, tb = sys.exc_info()
             print_msg()
@@ -134,6 +132,11 @@ class Runner:
 
 
 test = Runner(**sys_defaults)
+
+
+def eval_with_unbound(f, *args):
+    """ Bootstrapping, placeholder, overwritten later """
+    return f(*args)
 
 
 def post_mortem(tb):
@@ -421,29 +424,44 @@ def assert_raises_like():
     pass
 
 
+def spawn(f):
+    ctx = multiprocessing.get_context('spawn')
+    p = ctx.Process(target=f)
+    p.start()
+    return p
+
+
 def child():
     @test
     def in_child():
         print("I am a happy child", flush=True)
         assert 1 == 1
 
+def import_syntax_error():
+    import sub_module_syntax_error
 
 if multiprocessing.current_process().name == "MainProcess":
-    @test
-    def silence_child_processes(stdout):
-        ctx = multiprocessing.get_context('spawn')
-        p = ctx.Process(target=child)
-        p.start()
+    #@test
+    def silence_child_processes(stdout, stderr):
+        p = spawn(child) # <= causes import of all current modules
         p.join()
-        out = stdout.getvalue()
-        test.contains(out, "I am a happy child")
-        test.not_("in_child" in out)
+        # if it didn't load (e.g. SyntaxError), do not run test to avoid
+        # failures introduced by other modules that loaded as a result
+        # of multiprocessing spawn, but failed
+        if p.exitcode == 0:
+            out = stdout.getvalue()
+            test.contains(out, "I am a happy child")
+            test.not_("in_child" in out)
 
 
     @test
     def import_submodule(stdout):
         import sub_module_ok
-        test.eq("sub_module_ok  test_one  I am a happy submodule\nOK\n", stdout.getvalue())
+        m = stdout.getvalue()
+        test.contains(m, "sub_module_ok")
+        test.contains(m, "test_one")
+        test.contains(m, "I am a happy submodule")
+
 
     try:
         @test
@@ -454,6 +472,89 @@ if multiprocessing.current_process().name == "MainProcess":
     except AssertionError as e:
         assert "('eq', 123, 42)" == str(e), e
         print()
+
+
+    try:
+        @test
+        def import_syntax_error(stderr):
+            spawn(import_syntax_error).join()
+    except SyntaxError as e:
+        pass
+
+
+def bind_locals(names, frame):
+    """ bind unbound locals to value found on the stack """
+    if not frame:
+        return {}
+    local = frame.f_locals
+    local_names = local.keys() & names
+    return {**{name: local[name] for name in local_names}, **bind_locals(names - local_names, frame.f_back)}
+
+
+"""
+Create a function object.
+
+  code
+    a code object
+  globals
+    the globals dictionary
+  name
+    a string that overrides the name from the code object
+  argdefs
+    a tuple that specifies the default argument values
+  closure
+    a tuple that supplies the bindings for free variables
+"""
+
+def eval_with_unbound(func, *args):
+    closure = inspect.getclosurevars(func)
+    if closure.unbound:
+        ls = bind_locals(closure.unbound, inspect.currentframe())
+        type(lambda:0)(func.__code__, {**closure.builtins, **closure.globals, **ls}, None, (), ())(*args)
+    else:
+        func(*args)
+    return func
+
+
+class refer_to_class_members_while_class_being_defined:
+
+    a = 10
+    b = a
+
+    def c():
+        return 42
+
+    d = c
+    e = None
+
+    @test
+    def f():
+        """ During class construction, already defined member are not in scope, but autotest fixes this """
+        assert 10 == a
+        assert 10 == b
+        assert 42 == c()
+        assert 42 == d()
+        assert None == e
+
+    class nested_class:
+        b = 15
+        d = None
+        g = 97
+
+        @test
+        def h(fixture_A):
+            assert 10 == a
+            assert 15 == b
+            assert 42 == c()
+            assert None == d
+            assert None == e
+            assert 97 == g
+
+
+#@test
+def use_fixtures_as_context():
+    with test.tmp_path as p:
+        p.write_text("aap")
 
 # we import ourselves to trigger running the test if/when you run autotest as main
 import autotest
