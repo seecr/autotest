@@ -24,6 +24,7 @@
 
 
 import inspect
+import types
 import pathlib
 import tempfile
 import shutil
@@ -113,7 +114,7 @@ class Runner:
             if inspect.iscoroutinefunction(f):
                 asyncio.run(f(*args), debug=True)
             else:
-                eval_with_unbound(f, *args)
+                f = eval_with_unbound(f, *args)
         except BaseException as e:
             _, _, tb = sys.exc_info()
             print_msg()
@@ -136,7 +137,8 @@ test = Runner(**sys_defaults)
 
 def eval_with_unbound(f, *args):
     """ Bootstrapping, placeholder, overwritten later """
-    return f(*args)
+    f(*args)
+    return f
 
 
 def post_mortem(tb):
@@ -482,13 +484,18 @@ if multiprocessing.current_process().name == "MainProcess":
         pass
 
 
-def bind_locals(names, frame):
-    """ bind unbound locals to value found on the stack """
-    if not frame:
-        return {}
-    local = frame.f_locals
-    local_names = local.keys() & names
-    return {**{name: local[name] for name in local_names}, **bind_locals(names - local_names, frame.f_back)}
+def bind_names(bindings, names, frame):
+    """ find names in locals on the stack and binds them """
+    if not frame or not names:
+        return bindings
+    f_locals = frame.f_locals # rather expensive
+    rest = []
+    for name in names:
+        try:
+            bindings[name] = f_locals[name]
+        except KeyError:
+            rest.append(name)
+    return bind_names(bindings, rest, frame.f_back)
 
 
 """
@@ -507,48 +514,72 @@ Create a function object.
 """
 
 def eval_with_unbound(func, *args):
-    closure = inspect.getclosurevars(func)
-    if closure.unbound:
-        ls = bind_locals(closure.unbound, inspect.currentframe())
-        type(lambda:0)(func.__code__, {**closure.builtins, **closure.globals, **ls}, None, (), ())(*args)
-    else:
-        func(*args)
-    return func
+    f = types.FunctionType(
+            func.__code__,
+            bind_names(
+                func.__globals__.copy(),
+                func.__code__.co_names,
+                inspect.currentframe().f_back))
+    f(*args)
+    return f
 
 
-class refer_to_class_members_while_class_being_defined:
+M = 'module scope'
+a = 'scope:global'
+b = 10
 
-    a = 10
-    b = a
+assert 'scope:global' == a
+assert 10 == b
 
-    def c():
-        return 42
+class X:
+    a = 'scope:X'
+    x = 11
 
-    d = c
-    e = None
-
-    @test
-    def f():
-        """ During class construction, already defined member are not in scope, but autotest fixes this """
-        assert 10 == a
+    @test(keep=True)
+    def C(fixture_A):
+        a = 'scope:C'
+        c = 12
+        assert 'scope:C' == a
         assert 10 == b
-        assert 42 == c()
-        assert 42 == d()
-        assert None == e
+        assert 11 == x
+        assert 12 == c
+        assert 10 == abs(-10) # built-in
+        assert 'module scope' == M
+        assert 42 == fixture_A, fixture_A
+        return fixture_A
 
-    class nested_class:
-        b = 15
-        d = None
-        g = 97
+    @test(keep=True)
+    def D(fixture_A, fixture_B):
+        a = 'scope:D'
+        assert 'scope:D' == a
+        assert 10 == b
+        assert 11 == x
+        assert inspect.isfunction(C), C
+        assert 10 == abs(-10) # built-in
+        assert 'module scope' == M
+        assert 42 == fixture_A, fixture_A
+        assert 84 == fixture_B, fixture_B
+        return fixture_B
+
+    class Y:
+        a = 'scope:Y'
+        b = None
+        y = 13
 
         @test
-        def h(fixture_A):
-            assert 10 == a
-            assert 15 == b
-            assert 42 == c()
-            assert None == d
-            assert None == e
-            assert 97 == g
+        def h(fixture_C):
+            assert 'scope:Y' == a
+            assert None == b
+            assert 11 == x
+            assert 13 == y
+            assert inspect.isfunction(C)
+            assert inspect.isfunction(D)
+            assert C != D
+            assert 10 == abs(-10) # built-in
+            assert 42 == C(42)
+            assert 84 == D(42, 84) # "fixtures"
+            assert 'module scope' == M
+            assert 252 == fixture_C, fixture_C
 
 
 #@test
