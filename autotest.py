@@ -30,6 +30,7 @@ import tempfile
 import shutil
 import sys
 import operator
+import contextlib
 import functools
 import io
 import asyncio
@@ -89,7 +90,12 @@ class Runner:
 
 
     def __getattr__(self, name):
-        """ test.eq(lhs, rhs) etc, any operator from module 'operator' really. """
+        """ test.eq(lhs, rhs) etc, any operator from module 'operator' really.
+            or it returns a context manager if name denotes a fixture. """
+        if name in self.fixtures:
+            fx = self.fixtures[name]
+            _, args = self._get_args(fx)
+            return contextlib.contextmanager(fx)(*args)
         op = getattr(operator, name)
         def call(*args):
             if not bool(op(*args)):
@@ -103,13 +109,17 @@ class Runner:
         return []
 
 
+    def _get_args(self, f):
+        fxs = self._get_fixtures(f)
+        return fxs, (fx[2] for fx in fxs)
+
+
     def _run(self, f, keep=False, silent=False, skip=False):
         if skip:
             return
         print_msg = print if not silent else lambda *a, **k: None
         print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", end='', flush=True)
-        fxs = self._get_fixtures(f)
-        args = (fx[2] for fx in fxs)
+        fxs, args = self._get_args(f)
         try:
             if inspect.iscoroutinefunction(f):
                 asyncio.run(f(*args), debug=True)
@@ -582,10 +592,24 @@ class X:
             assert 252 == fixture_C, fixture_C
 
 
-#@test
+@test
 def use_fixtures_as_context():
+    print("WHAT:", test.tmp_path)
+    with test.fixture_A as a:
+        assert 42 == a
+    with test.fixture_B as b: # or pass parameter/fixture ourselves?
+        assert 84 == b
+    with test.fixture_C as c:
+        assert 252 == c
+    with test.stdout as s:
+        print("hello!")
+        assert "hello!\n" == s.getvalue()
+    keep = []
     with test.tmp_path as p:
-        p.write_text("aap")
+        keep.append(p)
+        (p / "f").write_text("contents")
+    assert not keep[0].exists()
+
 
 # we import ourselves to trigger running the test if/when you run autotest as main
 import autotest
