@@ -4,8 +4,6 @@
 #
 # Copyright (C) 2021 Seecr (Seek You Too B.V.) https://seecr.nl
 #
-# This file is part of "Meresco Components"
-#
 # "Autotest" is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 3 of the License, or
@@ -606,6 +604,7 @@ def bind_names(bindings, names, frame):
 
 
 def bind_1_frame_back(func):
+    """ Binds the unbound vars in func to values found on the stack """
     return types.FunctionType(
                func.__code__,                      # code
                bind_names(                         # globals
