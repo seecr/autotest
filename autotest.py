@@ -115,13 +115,13 @@ class Runner:
     def _run(self, f, *, keep, report, skip):
         if not skip:
             print_msg = print if report else lambda *a, **k: None
-            print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", end='', flush=True)
+            print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
             fxs, args = self._get_fixture_values(f)
+            f = bind_1_frame_back(f)
             try:
                 if inspect.iscoroutinefunction(f):
                     asyncio.run(f(*args), debug=True)
                 else:
-                    f = bind_1_frame_back(f)
                     f(*args)
             except BaseException as e:
                 et, ev, tb = sys.exc_info()
@@ -129,7 +129,6 @@ class Runner:
                 if e.args == ():
                     for fx in self.finalize_early:
                         list(fx)
-                    print()
                     traceback.print_exception(et, ev, tb.tb_next.tb_next)
                     post_mortem(tb)
                     exit(-1)
@@ -137,9 +136,7 @@ class Runner:
             finally:
                 finalize_fixtures(fxs)
                 del self.finalize_early[:]
-            print_msg("OK")
         return f if keep else None
-
 
 
 test = Runner(**sys_defaults)
@@ -680,7 +677,12 @@ class X:
 
     @test
     def fixtures_can_also_see_attrs_from_classed_being_defined(f_A):
-        assert 45 == f_A, f_A
+        assert v == f_A, f_A
+
+    @test
+    async def coroutines_can_also_see_attrs_from_classed_being_defined(f_A):
+        assert v == f_A, f_A
+
 
 
 @test.fixture
