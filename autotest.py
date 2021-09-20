@@ -46,7 +46,7 @@ sys_defaults = {
     # Also do not run tests when imported in a child, by multiprocessing
     'skip' : __name__ == '__main__' or multiprocessing.current_process().name != "MainProcess",
     'keep': False,      # Ditch test functions after running, or keep them in their namespace.
-    'silent': False,    # Do reporting of succeeded tests.
+    'report': True,     # Do reporting of succeeded tests.
 }
 
 
@@ -115,10 +115,10 @@ class Runner:
         return fxs, (fx[2] for fx in fxs)
 
 
-    def _run(self, f, *, keep, silent, skip):
+    def _run(self, f, *, keep, report, skip):
         if skip:
             return
-        print_msg = print if not silent else lambda *a, **k: None
+        print_msg = print if report else lambda *a, **k: None
         print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", end='', flush=True)
         fxs, args = self._get_args(f)
         try:
@@ -332,7 +332,7 @@ def new_assert():
 def test_testop_has_args():
 
     try:
-        @test(silent=True)
+        @test(report=False)
         def nested_test_with_testop():
             x = 42
             y = 67
@@ -348,7 +348,7 @@ def skip_until():
         test.eq(1, 2)
     test.default(skip=False)
     try:
-        @test(silent=True)
+        @test(report=False)
         def fails():
             test.gt(1, 2)
         test.fail()
@@ -357,11 +357,11 @@ def skip_until():
 
 @test
 def test_calls_other_test():
-    @test(keep=True, silent=True)
+    @test(keep=True, report=False)
     def test_a():
         assert 1 == 1
         return True
-    @test(silent=True)
+    @test(report=False)
     def test_b():
         assert test_a()
 
@@ -403,7 +403,7 @@ def stderr():
 def stdout_capture():
     name = "Erik"
     msgs = []
-    @test(silent=True)
+    @test(report=False)
     def capture_all(stdout, stderr):
         print(f"Hello {name}!", file=sys.stdout)
         print(f"Bye {name}!", file=sys.stderr)
@@ -415,7 +415,7 @@ def stdout_capture():
 #@test
 def capture_stdout_child_processes(stdout):
     def f():
-        @test(silent=True)
+        @test(report=False)
         def in_child():
             print("hier ben ik")
             assert 1 == 1
