@@ -238,8 +238,7 @@ def test_get_fixtures():
     assert inspect.isgenerator(gen)
     assert v == 9, v
     # everything OK, install it
-    setattr(Runner, '_get_fixtures', X._get_fixtures)
-    #Runner._get_fixtures = _get_fixtures
+    Runner._get_fixtures = X._get_fixtures
 
 
 @test.fixture
