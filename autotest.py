@@ -359,6 +359,15 @@ def new_assert():
         assert "('ne', 1, 1)" == str(e), str(e)
 
 
+# test.<op> is really just assert++ and does not need @test to run 'in'
+test.eq(1, 1)
+
+try:
+    test.lt(1, 1)
+except AssertionError as e:
+    assert "('lt', 1, 1)" == str(e), str(e)
+
+
 @test
 def test_testop_has_args():
     try:
@@ -713,6 +722,12 @@ def use_fixtures_as_context():
         assert 10 == d
     with test.fixture_D(16) as d: # fixture arg + addtional arg
         assert 16 == d
+
+
+# with test.<fixture> does not need @test to run 'in'
+with test.tmp_path as p:
+    assert p.exists()
+assert not p.exists()
 
 
 # we import ourselves to trigger running the test if/when you run autotest as main
