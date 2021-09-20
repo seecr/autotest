@@ -440,17 +440,18 @@ def stdout_capture():
     assert "Bye Erik!\n" == msgs[1]
 
 
-#@test
+@test
 def capture_stdout_child_processes(stdout):
     def f():
-        @test(report=False)
+        @test(report=False, skip=False)
         def in_child():
             print("hier ben ik")
             assert 1 == 1
     p = multiprocessing.Process(target=f)
     p.start()
     p.join()
-    test.eq("hier ben ik\n", stdout.getvalue())
+    # This gets fkd up if other output appears due to import done by multiprocessing spawn
+    assert "hier ben ik\n" in stdout.getvalue()
 
 
 @test
