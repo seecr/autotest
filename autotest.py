@@ -24,6 +24,7 @@
 
 
 import inspect
+import traceback
 import types
 import pathlib
 import tempfile
@@ -116,29 +117,29 @@ class Runner:
 
 
     def _run(self, f, *, keep, report, skip):
-        if skip:
-            return
-        print_msg = print if report else lambda *a, **k: None
-        print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", end='', flush=True)
-        fxs, args = self._get_args(f)
-        try:
-            if inspect.iscoroutinefunction(f):
-                asyncio.run(f(*args), debug=True)
-            else:
-                f = eval_with_unbound(f, *args)
-        except BaseException as e:
-            _, _, tb = sys.exc_info()
-            print_msg()
-            if e.args == ():
-                for fx in self.finalize_early:
-                    list(fx)
-                post_mortem(tb)
-                exit(-1)
-            raise
-        finally:
-            finalize_fixtures(fxs)
-            del self.finalize_early[:]
-        print_msg("OK")
+        if not skip:
+            print_msg = print if report else lambda *a, **k: None
+            print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", end='', flush=True)
+            fxs, args = self._get_args(f)
+            try:
+                if inspect.iscoroutinefunction(f):
+                    asyncio.run(f(*args), debug=True)
+                else:
+                    f = eval_with_unbound(f, *args)
+            except BaseException as e:
+                et, ev, tb = sys.exc_info()
+                print()
+                if e.args == ():
+                    for fx in self.finalize_early:
+                        list(fx)
+                    traceback.print_exception(et, ev, tb.tb_next.tb_next)
+                    post_mortem(tb)
+                    exit(-1)
+                raise
+            finally:
+                finalize_fixtures(fxs)
+                del self.finalize_early[:]
+            print_msg("OK")
         return f if keep else None
 
 
@@ -202,7 +203,7 @@ def test_get_fixtures():
             return [(lambda fx=self.fixtures[name]:
                         (lambda fxs=self._get_fixtures(fx):
                             (lambda gen=fx(*(x[2] for x in fxs)):
-                                (fxs, gen, next(gen)))())())() for name in inspect.signature(f).parameters]
+                                (fxs, gen, next(gen)))())())() for name in inspect.signature(f).parameters if name in self.fixtures]
     x = X()
     def f(): pass
     assert [] == x._get_fixtures(f)
@@ -364,6 +365,28 @@ def test_calls_other_test():
     @test(report=False)
     def test_b():
         assert test_a()
+
+
+@test
+def test_calls_other_test_with_fixture():
+    @test(keep=True, report=False)
+    def test_a(fixture_A):
+        assert 42 == fixture_A
+        return True
+    @test(report=False)
+    def test_b():
+        assert test_a(42)
+
+
+@test
+def test_calls_other_test_with_fixture_and_more_args():
+    @test(keep=True, report=False, skip=True)
+    def test_a(fixture_A, value):
+        assert 42 == fixture_A
+        return True
+    @test(report=False)
+    def test_b(fixture_A):
+        assert test_a(fixture_A, 42)
 
 
 def capture(name):
