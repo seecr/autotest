@@ -128,10 +128,11 @@ class Runner:
                     f = eval_with_unbound(f, *args)
             except BaseException as e:
                 et, ev, tb = sys.exc_info()
-                print()
+                print_msg('??')
                 if e.args == ():
                     for fx in self.finalize_early:
                         list(fx)
+                    print()
                     traceback.print_exception(et, ev, tb.tb_next.tb_next)
                     post_mortem(tb)
                     exit(-1)
@@ -329,9 +330,9 @@ def new_assert():
     except AssertionError as e:
         assert "('ne', 1, 1)" == str(e), str(e)
 
+
 @test
 def test_testop_has_args():
-
     try:
         @test(report=False)
         def nested_test_with_testop():
@@ -339,7 +340,10 @@ def test_testop_has_args():
             y = 67
             test.eq(x, y)
     except AssertionError as e:
+        assert hasattr(e, 'args')
+        assert 3 == len(e.args)
         test.eq("('eq', 42, 67)", str(e))
+
 
 @test
 def skip_until():
@@ -355,6 +359,7 @@ def skip_until():
         test.fail()
     except AssertionError as e:
         test.eq("('gt', 1, 2)", str(e))
+
 
 @test
 def test_calls_other_test():
@@ -422,7 +427,7 @@ def stderr():
     yield from g
 
 
-#@test
+@test
 def stdout_capture():
     name = "Erik"
     msgs = []
