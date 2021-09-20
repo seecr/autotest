@@ -473,16 +473,18 @@ def spawn(f):
 
 
 def child():
-    @test
+    @test(report=False, skip=False) # override default skip=True in spawned process
     def in_child():
         print("I am a happy child", flush=True)
         assert 1 == 1
 
+
 def import_syntax_error():
     import sub_module_syntax_error
 
+
 if multiprocessing.current_process().name == "MainProcess":
-    #@test
+    @test
     def silence_child_processes(stdout, stderr):
         p = spawn(child) # <= causes import of all current modules
         p.join()
