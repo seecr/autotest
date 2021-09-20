@@ -33,7 +33,6 @@ import sys
 import operator
 import contextlib
 import functools
-import io
 import asyncio
 import multiprocessing
 import os
@@ -49,8 +48,6 @@ sys_defaults = {
     'keep': False,      # Ditch test functions after running, or keep them in their namespace.
     'report': True,     # Do reporting of succeeded tests.
 }
-
-
 
 
 class Runner:
@@ -82,8 +79,9 @@ class Runner:
         """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
            That value is used as argument to functions declaring the fixture in their args. """
         assert inspect.isgeneratorfunction(f), f
-        self.fixtures[f.__name__] = f
-        return f
+        bound_f = bind_1_frame_back(f)
+        self.fixtures[f.__name__] = bound_f
+        return bound_f
 
 
     def early_finalize(self, fx):
@@ -96,8 +94,8 @@ class Runner:
             or it returns a context manager if name denotes a fixture. """
         if name in self.fixtures:
             fx = self.fixtures[name]
-            _, args = self._get_args(fx)
-            return contextlib.contextmanager(fx)(*args)
+            _, args = self._get_fixture_values(fx)
+            return ReargsContextManager(fx, *args)
         op = getattr(operator, name)
         def call(*args):
             if not bool(op(*args)):
@@ -111,7 +109,7 @@ class Runner:
         return []
 
 
-    def _get_args(self, f):
+    def _get_fixture_values(self, f):
         fxs = self._get_fixtures(f)
         return fxs, (fx[2] for fx in fxs)
 
@@ -120,15 +118,16 @@ class Runner:
         if not skip:
             print_msg = print if report else lambda *a, **k: None
             print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", end='', flush=True)
-            fxs, args = self._get_args(f)
+            fxs, args = self._get_fixture_values(f)
             try:
                 if inspect.iscoroutinefunction(f):
                     asyncio.run(f(*args), debug=True)
                 else:
-                    f = eval_with_unbound(f, *args)
+                    f = bind_1_frame_back(f)
+                    f(*args)
             except BaseException as e:
                 et, ev, tb = sys.exc_info()
-                print_msg('??')
+                print_msg()
                 if e.args == ():
                     for fx in self.finalize_early:
                         list(fx)
@@ -148,10 +147,13 @@ class Runner:
 test = Runner(**sys_defaults)
 
 
-def eval_with_unbound(f, *args):
+ReargsContextManager = contextlib.contextmanager
+""" Bootstrapping, placeholder, overwritten later """
+
+
+def bind_1_frame_back(_func_):
     """ Bootstrapping, placeholder, overwritten later """
-    f(*args)
-    return f
+    return _func_
 
 
 def post_mortem(tb):
@@ -193,6 +195,37 @@ def AnyNumber():
     assert not any_number(9,15) == "A"
     assert not any_number(9,15) == object
 
+
+def _(): yield
+ContextManagerType = type(contextlib.contextmanager(_)())
+del _
+
+
+class ReargsContextManager(ContextManagerType):
+    """ Context manager that accepts additional args everytime it is called.
+        NB: Implementation closely tied to contexlib.py """
+    def __init__(self, f, *args, **kwds):
+        self.func = f
+        self.args = args
+        self.kwds = kwds
+    def __call__(self, *args, **kwds):
+        self.args += args
+        self.kwds.update(kwds)
+        return self
+    def __enter__(self):
+        self.gen = self.func(*self.args, **self.kwds)
+        return super().__enter__()
+
+
+@test
+def extra_args_supplying_contextmanager():
+    def f(a, b, c, *, d, e, f):
+        yield a, b, c, d, e, f
+    c = ReargsContextManager(f, 'a', d='d')
+    assert isinstance(c, contextlib.AbstractContextManager)
+    c('b', e='e')
+    with c('c', f='f') as v:
+        assert ('a', 'b', 'c', 'd', 'e', 'f') == v, v
 
 
 """ bootstrapping: test and instal fixture support """
@@ -460,9 +493,42 @@ async def async_function():
     assert True
 
 
-@test(skip=True)
-def assert_raises_like():
-    pass
+@test.fixture
+def raises(exception=Exception):
+    try:
+        yield
+    except exception:
+        pass
+    else:
+        raise AssertionError(f"should raise {exception.__name__}")
+
+
+@test
+def assert_raises():
+    with test.raises:
+        raise Exception
+    try:
+        with test.raises:
+            pass
+    except AssertionError as e:
+        assert 'should raise Exception' == str(e), e
+
+
+@test
+def assert_raises_specific_exception():
+    with test.raises(KeyError):
+        raise KeyError
+    try:
+        with test.raises(KeyError):
+            raise RuntimeError('oops')
+    except RuntimeError as e:
+        assert 'oops' == str(e), e
+    try:
+        with test.raises(KeyError):
+            pass
+    except AssertionError as e:
+        assert 'should raise KeyError' == str(e), e
+
 
 
 def spawn(f):
@@ -539,30 +605,16 @@ def bind_names(bindings, names, frame):
     return bind_names(bindings, rest, frame.f_back)
 
 
-"""
-Create a function object.
-
-  code
-    a code object
-  globals
-    the globals dictionary
-  name
-    a string that overrides the name from the code object
-  argdefs
-    a tuple that specifies the default argument values
-  closure
-    a tuple that supplies the bindings for free variables
-"""
-
-def eval_with_unbound(func, *args):
-    f = types.FunctionType(
-            func.__code__,
-            bind_names(
-                func.__globals__.copy(),
-                func.__code__.co_names,
-                inspect.currentframe().f_back))
-    f(*args)
-    return f
+def bind_1_frame_back(func):
+    return types.FunctionType(
+               func.__code__,                      # code
+               bind_names(                         # globals
+                   func.__globals__.copy(),
+                   func.__code__.co_names,
+                   inspect.currentframe().f_back),
+               func.__name__,                      # name
+               func.__defaults__,                  # default arguments
+               func.__code__.co_freevars)          # closure/free vars
 
 
 M = 'module scope'
@@ -622,6 +674,20 @@ class X:
             assert 'module scope' == M
             assert 252 == fixture_C, fixture_C
 
+    v = 45
+    @test.fixture
+    def f_A():
+        yield v
+
+    @test
+    def fixtures_can_also_see_attrs_from_classed_being_defined(f_A):
+        assert 45 == f_A, f_A
+
+
+@test.fixture
+def fixture_D(fixture_A, a = 10):
+    yield a
+
 
 @test
 def use_fixtures_as_context():
@@ -639,6 +705,13 @@ def use_fixtures_as_context():
         keep.append(p)
         (p / "f").write_text("contents")
     assert not keep[0].exists()
+    # it is possible to supply additional args when used as context
+    with test.fixture_D as d: # only fixture as arg
+        assert 10 == d
+    with test.fixture_D() as d: # idem
+        assert 10 == d
+    with test.fixture_D(16) as d: # fixture arg + addtional arg
+        assert 16 == d
 
 
 # we import ourselves to trigger running the test if/when you run autotest as main
