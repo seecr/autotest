@@ -42,10 +42,11 @@ __all__ = ['test', 'Runner']
 
 
 sys_defaults = {
-    # We run self-tests when imported, not when run as main program. This
-    # avoids tests run multiple times.
+    # We run self-tests when imported, not when run as main program. This # avoids tests run multiple times.
     # Also do not run tests when imported in a child, by multiprocessing
     'skip' : __name__ == '__main__' or multiprocessing.current_process().name != "MainProcess",
+    'keep': False,      # Ditch test functions after running, or keep them in their namespace.
+    'silent': False,    # Do reporting of succeeded tests.
 }
 
 
@@ -114,7 +115,7 @@ class Runner:
         return fxs, (fx[2] for fx in fxs)
 
 
-    def _run(self, f, keep=False, silent=False, skip=False):
+    def _run(self, f, *, keep, silent, skip):
         if skip:
             return
         print_msg = print if not silent else lambda *a, **k: None
@@ -594,7 +595,6 @@ class X:
 
 @test
 def use_fixtures_as_context():
-    print("WHAT:", test.tmp_path)
     with test.fixture_A as a:
         assert 42 == a
     with test.fixture_B as b: # or pass parameter/fixture ourselves?
