@@ -73,18 +73,25 @@ class Runner:
             raise AssertionError(*args)
 
 
-    def fixture(self, f):
+    def fixture(self, func=None, finalize_early=False):
         """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
            That value is used as argument to functions declaring the fixture in their args. """
-        assert inspect.isgeneratorfunction(f), f
-        bound_f = bind_1_frame_back(f)
-        self.fixtures[f.__name__] = bound_f
-        return bound_f
-
-
-    def early_finalize(self, fx):
-        """ Fixtures finalized before debugging (i.e. stdout)"""
-        self.finalize_early.append(fx)
+        def do(f):
+            assert inspect.isgeneratorfunction(f), f
+            bound_f = bind_1_frame_back(f)
+            if finalize_early:
+                def wrap(*a, **k):
+                    g = bound_f(*a, **k)
+                    self.finalize_early.append(g)
+                    return g
+                self.fixtures[f.__name__] = wrap
+            else:
+                self.fixtures[f.__name__] = bound_f
+            return bound_f
+        if func:
+            do(func)
+        else:
+            return do
 
 
     def __getattr__(self, name):
@@ -450,18 +457,14 @@ def capture(name):
         setattr(sys, name, org_stream)
 
 
-@test.fixture
+@test.fixture(finalize_early=True)
 def stdout():
-    g = capture('stdout')
-    test.early_finalize(g)
-    yield from g
+    yield from capture('stdout')
 
 
-@test.fixture
+@test.fixture(finalize_early=True)
 def stderr():
-    g = capture('stderr')
-    test.early_finalize(g)
-    yield from g
+    yield from capture('stderr')
 
 
 @test
