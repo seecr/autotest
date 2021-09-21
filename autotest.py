@@ -770,9 +770,15 @@ assert not p.exists()
 
 @test
 def idea_for_dumb_diffs():
-    # if you want a so called smart diff, just make it explicit, the second arg of assert is meant for it
+    # if you want a so called smart diff: the second arg of assert is meant for it.
+    # Runner supplies a generic (lazy) diff between two pretty printed values
     a = [7, 1, 2, 8, 3, 4]
     b = [1, 2, 9, 3, 4, 6]
+    d = test.diff(a, b)
+    assert str != type(d)
+    assert callable(d.__str__)
+    assert str == type(str(d))
+
     try:
         assert a == b, test.diff(a,b)
     except AssertionError as e:
@@ -784,6 +790,15 @@ def idea_for_dumb_diffs():
 ?        ^      +++
 """ == str(e)
 
+
+    # you can als pass a diff function to test.<op>().
+    # diff should accept the args preceeding it
+    # str is called on the result, so you can make it lazy
+    try:
+        test.eq("aap", "ape", diff=lambda x, y: "mydiff")
+    except AssertionError as e:
+        assert "mydiff" == str(e)
+
     try:
         test.eq(a, b, diff=test.diff)
     except AssertionError as e:
@@ -794,6 +809,19 @@ def idea_for_dumb_diffs():
 + [1, 2, 9, 3, 4, 6]
 ?        ^      +++
 """ == str(e), e
+
+
+    # use of a function from elswhere
+    a = set([7, 1, 2, 8, 3, 4])
+    b = set([1, 2, 9, 3, 4, 6])
+    try:
+        assert a == b, set.symmetric_difference(a, b)
+    except AssertionError as e:
+        assert "{6, 7, 8, 9}" == str(e), e
+    try:
+        test.eq(a, b, diff=set.symmetric_difference)
+    except AssertionError as e:
+        assert "{6, 7, 8, 9}" == str(e), e
 
 
 # we import ourselves to trigger running the test if/when you run autotest as main
