@@ -28,12 +28,15 @@ import pathlib
 import tempfile
 import shutil
 import sys
+import pdb
 import operator
 import contextlib
 import functools
 import asyncio
 import multiprocessing
 import os
+import difflib
+import pprint
 
 
 __all__ = ['test', 'Runner']
@@ -42,9 +45,11 @@ __all__ = ['test', 'Runner']
 sys_defaults = {
     # We run self-tests when imported, not when run as main program. This # avoids tests run multiple times.
     # Also do not run tests when imported in a child, by multiprocessing
-    'skip' : __name__ == '__main__' or multiprocessing.current_process().name != "MainProcess",
-    'keep': False,      # Ditch test functions after running, or keep them in their namespace.
-    'report': True,     # Do reporting of succeeded tests.
+    'skip'  : __name__ == '__main__' or
+              multiprocessing.current_process().name != "MainProcess",
+
+    'keep'  : False,      # Ditch test functions after running, or keep them in their namespace.
+    'report': True,       # Do reporting of succeeded tests.
 }
 
 
@@ -64,34 +69,43 @@ class Runner:
 
 
     def default(self, **kws):
-        """ Set default options for nexts tests."""
+        """ Set default options for next tests."""
         self.defaults.update(kws)
 
 
-    def fail(self, *args):
+    def fail(self, *args, **kwds):
         if not self.defaults.get('skip', False):
+            args += (kwds,) if kwds else ()
             raise AssertionError(*args)
 
 
     def fixture(self, func=None, finalize_early=False):
         """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
-           That value is used as argument to functions declaring the fixture in their args. """
-        def do(f):
+           That value is used as argument to functions declaring the fixture in their args.
+           finalize_early means the fixture is finalized before pdb instead of at the very end."""
+        def register(f):
             assert inspect.isgeneratorfunction(f), f
             bound_f = bind_1_frame_back(f)
             if finalize_early:
-                def wrap(*a, **k):
-                    g = bound_f(*a, **k)
-                    self.finalize_early.append(g)
-                    return g
-                self.fixtures[f.__name__] = wrap
+                def register_early(*a, **k):
+                    gen = bound_f(*a, **k)
+                    self.finalize_early.append(gen)
+                    return gen
+                self.fixtures[f.__name__] = register_early
             else:
                 self.fixtures[f.__name__] = bound_f
             return bound_f
-        if func:
-            do(func)
-        else:
-            return do
+        return register(func) if func else register
+
+
+    def diff(self, a, b):
+        """ When str called, produces diff of textual representation of a and b. """
+        return lazy_str(
+            lambda:
+                '\n' + '\n'.join(
+                    difflib.ndiff(
+                        pprint.pformat(a).splitlines(),
+                        pprint.pformat(b).splitlines())))
 
 
     def __getattr__(self, name):
@@ -100,13 +114,16 @@ class Runner:
         if name in self.fixtures:
             fx = self.fixtures[name]
             _, args = self._get_fixture_values(fx)
-            return ReargsContextManager(fx, *args)
+            return CollectArgsContextManager(fx, *args)
         op = getattr(operator, name)
-        def call(*args):
+        def call_operator(*args, diff=None):
             if not bool(op(*args)):
-                raise AssertionError(op.__name__, *args)
+                if diff:
+                    raise AssertionError(diff(*args))
+                else:
+                    raise AssertionError(op.__name__, *args)
             return True
-        return call
+        return call_operator
 
 
     def _get_fixtures(*_):
@@ -149,7 +166,7 @@ class Runner:
 test = Runner(**sys_defaults)
 
 
-ReargsContextManager = contextlib.contextmanager
+CollectArgsContextManager = contextlib.contextmanager
 """ Bootstrapping, placeholder, overwritten later """
 
 
@@ -159,7 +176,6 @@ def bind_1_frame_back(_func_):
 
 
 def post_mortem(tb):
-    import pdb
     p = pdb.Pdb()
     p.rcLines.extend(['longlist'])
     p.reset()
@@ -169,6 +185,13 @@ def post_mortem(tb):
 def finalize_fixtures(fxs):
     """ Exhaust all fixture generators, recursively. """
     [(list(fx[1]), finalize_fixtures(fx[0])) for fx in fxs]
+
+
+class lazy_str:
+    def __init__(self, f):
+        self._f = f
+    def __str__(self):
+        return self._f()
 
 
 # Example Tests
@@ -203,7 +226,7 @@ ContextManagerType = type(contextlib.contextmanager(_)())
 del _
 
 
-class ReargsContextManager(ContextManagerType):
+class CollectArgsContextManager(ContextManagerType):
     """ Context manager that accepts additional args everytime it is called.
         NB: Implementation closely tied to contexlib.py """
     def __init__(self, f, *args, **kwds):
@@ -223,7 +246,7 @@ class ReargsContextManager(ContextManagerType):
 def extra_args_supplying_contextmanager():
     def f(a, b, c, *, d, e, f):
         yield a, b, c, d, e, f
-    c = ReargsContextManager(f, 'a', d='d')
+    c = CollectArgsContextManager(f, 'a', d='d')
     assert isinstance(c, contextlib.AbstractContextManager)
     c('b', e='e')
     with c('c', f='f') as v:
@@ -355,7 +378,7 @@ def new_assert():
 
     try:
         test.eq(1, 2)
-        test.fail()
+        test.fail(msg="too bad")
     except AssertionError as e:
         assert ('eq', 1, 2) == e.args, e.args
 
@@ -364,6 +387,19 @@ def new_assert():
         test.fail()
     except AssertionError as e:
         assert "('ne', 1, 1)" == str(e), str(e)
+
+
+@test
+def test_fail():
+    try:
+        test.fail("plz fail")
+    except AssertionError as e:
+        assert "plz fail" == str(e), e
+
+    try:
+        test.fail("plz fail", info="more")
+    except AssertionError as e:
+        assert "('plz fail', {'info': 'more'})" == str(e), e
 
 
 # test.<op> is really just assert++ and does not need @test to run 'in'
@@ -587,7 +623,6 @@ if multiprocessing.current_process().name == "MainProcess":
         test.fail("Should have failed.")
     except AssertionError as e:
         assert "('eq', 123, 42)" == str(e), e
-        print()
 
 
     try:
@@ -731,6 +766,34 @@ def use_fixtures_as_context():
 with test.tmp_path as p:
     assert p.exists()
 assert not p.exists()
+
+
+@test
+def idea_for_dumb_diffs():
+    # if you want a so called smart diff, just make it explicit, the second arg of assert is meant for it
+    a = [7, 1, 2, 8, 3, 4]
+    b = [1, 2, 9, 3, 4, 6]
+    try:
+        assert a == b, test.diff(a,b)
+    except AssertionError as e:
+        assert """
+- [7, 1, 2, 8, 3, 4]
+?  ---      ^
+
++ [1, 2, 9, 3, 4, 6]
+?        ^      +++
+""" == str(e)
+
+    try:
+        test.eq(a, b, diff=test.diff)
+    except AssertionError as e:
+        assert """
+- [7, 1, 2, 8, 3, 4]
+?  ---      ^
+
++ [1, 2, 9, 3, 4, 6]
+?        ^      +++
+""" == str(e), e
 
 
 # we import ourselves to trigger running the test if/when you run autotest as main
