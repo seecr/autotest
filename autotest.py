@@ -116,10 +116,10 @@ class Runner:
             _, args = self._get_fixture_values(fx)
             return CollectArgsContextManager(fx, *args)
         op = getattr(operator, name)
-        def call_operator(*args, diff=None):
+        def call_operator(*args, msg=None):
             if not bool(op(*args)):
-                if diff:
-                    raise AssertionError(diff(*args))
+                if msg:
+                    raise AssertionError(msg(*args))
                 else:
                     raise AssertionError(op.__name__, *args)
             return True
@@ -140,8 +140,8 @@ class Runner:
         if not skip:
             print_msg = print if report else lambda *a, **k: None
             print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
-            fxs, args = self._get_fixture_values(f)
             f = bind_1_frame_back(f)
+            fxs, args = self._get_fixture_values(f)
             try:
                 if inspect.iscoroutinefunction(f):
                     asyncio.run(f(*args), debug=True)
@@ -795,12 +795,12 @@ def idea_for_dumb_diffs():
     # diff should accept the args preceeding it
     # str is called on the result, so you can make it lazy
     try:
-        test.eq("aap", "ape", diff=lambda x, y: "mydiff")
+        test.eq("aap", "ape", msg=lambda x, y: "mydiff")
     except AssertionError as e:
         assert "mydiff" == str(e)
 
     try:
-        test.eq(a, b, diff=test.diff)
+        test.eq(a, b, msg=test.diff)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -819,10 +819,9 @@ def idea_for_dumb_diffs():
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
     try:
-        test.eq(a, b, diff=set.symmetric_difference)
+        test.eq(a, b, msg=set.symmetric_difference)
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
 
 
-# we import ourselves to trigger running the test if/when you run autotest as main
 import autotest
