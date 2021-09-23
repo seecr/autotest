@@ -50,7 +50,7 @@ sys_defaults = {
 
     'keep'  : False,      # Ditch test functions after running, or keep them in their namespace.
     'report': True,       # Do reporting of succeeded tests.
-    'bind'  : False,      # Kept functions are bound to fixtures or not
+    'bind'  : False,      # Kept functions are bound to fixtures
 }
 
 
@@ -72,16 +72,16 @@ class Runner:
 
     def _bind_options(self, *, bind, skip, keep, **opts):
         def _do_run(f):
-            f = bind_1_frame_back(f)
+            stack_bound_f = bind_1_frame_back(f)
             fxs = self._get_fixtures(f)
-            bound = functools.partial(self._run, f, fxs, **opts)
+            fixtures_bound_f = functools.partial(self._run, stack_bound_f, fxs, **opts)
             if not skip:
-                bound()
+                fixtures_bound_f()
             if not keep:
                 return
             if bind:
-                return bound
-            return f
+                return fixtures_bound_f
+            return stack_bound_f
         return _do_run
 
 
@@ -663,6 +663,7 @@ def bind_names(bindings, names, frame):
 
 def bind_1_frame_back(func):
     """ Binds the unbound vars in func to values found on the stack """
+    print(func.__code__.co_freevars)
     return types.FunctionType(
                func.__code__,                      # code
                bind_names(                         # globals
@@ -862,5 +863,15 @@ def bind_test_functions_to_their_fixtures():
 
     assert 34 == bound_fixture_1() # no need to pass args, already bound
     assert (56, "top") == bound_fixture_2(56, extra="top") # no need to pass args, already bound
+
+    class A:
+        a = 34
+
+        @test(keep=True, bind=True) # skip, need more args
+        def bound_fixture_acces_class_locals(my_fix):
+            assert 78 == my_fix
+            assert 34 == a
+            return a
+        assert 34 == bound_fixture_acces_class_locals()
 
 import autotest
