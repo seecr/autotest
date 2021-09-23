@@ -74,7 +74,8 @@ class Runner:
         fixtures_bound_f = functools.partial(
                 self._run,
                 stack_bound_f,
-                self._get_fixtures(f),
+                self.fixtures.copy(),
+                #self._get_fixtures(f),
                 **opts)
         if not skip:
             fixtures_bound_f()
@@ -87,25 +88,43 @@ class Runner:
     def _run(self, f, fxs, *f_args, report, **f_kwds):
         print_msg = print if report else lambda *a, **k: None
         print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
-        fx_values = (fx[2] for fx in fxs)
         try:
-            if inspect.iscoroutinefunction(f):
-                asyncio.run(f(*fx_values, *f_args, **f_kwds), debug=True)
-            else:
-                return f(*fx_values, *f_args, **f_kwds)
-        except BaseException as e:
+            result = run_with_fixtures(fxs, f, *f_args, **f_kwds)
+            if inspect.iscoroutine(result):
+                asyncio.run(result)
+            return result
+        except BaseException:
             et, ev, tb = sys.exc_info()
             print_msg()
-            if e.args == ():
-                for fx in self.finalize_early:
-                    list(fx)
+            if ev.args == ():
+                #for fx in self.finalize_early:
+                #    list(fx)
                 traceback.print_exception(et, ev, tb.tb_next.tb_next)
                 post_mortem(tb)
                 exit(-1)
             raise
-        finally:
-            finalize_fixtures(fxs)
-            del self.finalize_early[:]
+        #finally:
+        #    del self.finalize_early[:]
+
+        #fx_values = (fx[2] for fx in fxs)
+        #try:
+        #    if inspect.iscoroutinefunction(f):
+        #        asyncio.run(f(*fx_values, *f_args, **f_kwds), debug=True)
+        #    else:
+        #        return f(*fx_values, *f_args, **f_kwds)
+        #except BaseException as e:
+        #    et, ev, tb = sys.exc_info()
+        #    print_msg()
+        #    if e.args == ():
+        #        for fx in self.finalize_early:
+        #            list(fx)
+        #        traceback.print_exception(et, ev, tb.tb_next.tb_next)
+        #        post_mortem(tb)
+        #        exit(-1)
+        #    raise
+        #finally:
+        #    finalize_fixtures(fxs)
+        #    del self.finalize_early[:]
 
 
     def default(self, **kws):
@@ -154,7 +173,8 @@ class Runner:
         if name in self.fixtures:
             fx = self.fixtures[name]
             _, args = self._get_fixture_values(fx)
-            return CollectArgsContextManager(fx, *args)
+            fx = functools.partial(run_with_fixtures, self.fixtures, fx)
+            return CollectArgsContextManager(fx)
         op = getattr(operator, name)
         def call_operator(*args, msg=None):
             if not bool(op(*args)):
@@ -178,6 +198,9 @@ class Runner:
 
 test = Runner(**sys_defaults)
 
+
+def run_with_fixtures(_, f, *a, **k):
+    return f(*a, **k)
 
 CollectArgsContextManager = contextlib.contextmanager
 """ Bootstrapping, placeholder, overwritten later """
@@ -266,8 +289,45 @@ def extra_args_supplying_contextmanager():
         assert ('a', 'b', 'c', 'd', 'e', 'f') == v, v
 
 
+run = Runner()
+trace = []
+
+@run.fixture
+def fx_a():
+    trace.append("A start")
+    yield 67
+    trace.append("A end")
+
+@run.fixture
+def fx_b(fx_a):
+    trace.append("B start")
+    yield 74
+    trace.append("B end")
+
+def get_fixtures(fixtures, func, context, *args, **kwds):
+    return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
+                   for name in inspect.signature(func).parameters if name in fixtures),
+                *args, **kwds)
+
+def run_with_fixtures(fixtures, f, *args, **kwds):
+    with contextlib.ExitStack() as context:
+        return get_fixtures(fixtures, f, context, *args, **kwds)
+
+def test_a(fx_a, fx_b, a, b=10):
+    assert 67 == fx_a
+    assert 74 == fx_b
+    assert 9 == a
+    assert 11 == b
+    trace.append("test_a done")
+
+run_with_fixtures(run.fixtures, test_a, 9, b=11)
+
+assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
+
+
+
 """ bootstrapping: test and instal fixture support """
-@test
+#@test
 def test_get_fixtures():
     class X(Runner):
         def _get_fixtures(self, f):
@@ -915,43 +975,6 @@ def bind_test_functions_to_their_fixtures():
     #assert ['S', 'D'] == trace
     #assert rebind_on_every_call()
     #assert ['S', 'D', 'S', 'D'] == trace
-
-run = Runner()
-trace = []
-
-@run.fixture
-def fx_a():
-    trace.append("A start")
-    yield 67
-    trace.append("A end")
-
-@run.fixture
-def fx_b(fx_a):
-    trace.append("B start")
-    yield 74
-    trace.append("B end")
-
-def get_fixtures(fixtures, func, context, *args, **kwds):
-    return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
-                   for name in inspect.signature(func).parameters if name in fixtures),
-                *args, **kwds)
-
-def run_with_fixtures(fixtures, f, *args, **kwds):
-    with contextlib.ExitStack() as context:
-        return get_fixtures(fixtures, f, context, *args, **kwds)
-
-def test_a(fx_a, fx_b, a, b=10):
-    assert 67 == fx_a
-    assert 74 == fx_b
-    assert 9 == a
-    assert 11 == b
-    trace.append("test_a done")
-
-run_with_fixtures(run.fixtures, test_a, 9, b=11)
-
-assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
-
-
 
 
 
