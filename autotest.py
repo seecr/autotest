@@ -50,6 +50,7 @@ sys_defaults = {
 
     'keep'  : False,      # Ditch test functions after running, or keep them in their namespace.
     'report': True,       # Do reporting of succeeded tests.
+    'bind'  : False,      # Kept functions are bound to fixtures or not
 }
 
 
@@ -64,8 +65,48 @@ class Runner:
     def __call__(self, f=None, **opts):
         """Decorator to define, run and report a test"""
         if opts:
-            return functools.partial(self._run, **{**self.defaults, **opts})
-        return self._run(f, **self.defaults)
+            return self._bind_options(**{**self.defaults, **opts})
+        bound_f = self._bind_options(**self.defaults)
+        bound_f(f)
+
+
+    def _bind_options(self, *, bind, skip, keep, **opts):
+        def _do_run(f):
+            f = bind_1_frame_back(f)
+            fxs = self._get_fixtures(f)
+            bound = functools.partial(self._run, f, fxs, **opts)
+            if not skip:
+                bound()
+            if not keep:
+                return
+            if bind:
+                return bound
+            return f
+        return _do_run
+
+
+    def _run(self, f, fxs, *args, report, **kwds):
+        print_msg = print if report else lambda *a, **k: None
+        print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
+        fx_values = (fx[2] for fx in fxs)
+        try:
+            if inspect.iscoroutinefunction(f):
+                asyncio.run(f(*fx_values), debug=True)
+            else:
+                return f(*fx_values, *args, **kwds)
+        except BaseException as e:
+            et, ev, tb = sys.exc_info()
+            print_msg()
+            if e.args == ():
+                for fx in self.finalize_early:
+                    list(fx)
+                traceback.print_exception(et, ev, tb.tb_next.tb_next)
+                post_mortem(tb)
+                exit(-1)
+            raise
+        finally:
+            finalize_fixtures(fxs)
+            del self.finalize_early[:]
 
 
     def default(self, **kws):
@@ -134,33 +175,6 @@ class Runner:
     def _get_fixture_values(self, f):
         fxs = self._get_fixtures(f)
         return fxs, (fx[2] for fx in fxs)
-
-
-    def _run(self, f, *, keep, report, skip):
-        if not skip:
-            print_msg = print if report else lambda *a, **k: None
-            print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
-            f = bind_1_frame_back(f)
-            fxs, args = self._get_fixture_values(f)
-            try:
-                if inspect.iscoroutinefunction(f):
-                    asyncio.run(f(*args), debug=True)
-                else:
-                    f(*args)
-            except BaseException as e:
-                et, ev, tb = sys.exc_info()
-                print_msg()
-                if e.args == ():
-                    for fx in self.finalize_early:
-                        list(fx)
-                    traceback.print_exception(et, ev, tb.tb_next.tb_next)
-                    post_mortem(tb)
-                    exit(-1)
-                raise
-            finally:
-                finalize_fixtures(fxs)
-                del self.finalize_early[:]
-        return f if keep else None
 
 
 test = Runner(**sys_defaults)
@@ -823,5 +837,30 @@ def idea_for_dumb_diffs():
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
 
+
+@test
+def bind_test_functions_to_their_fixtures():
+    @test.fixture
+    def my_fix():
+        yield 34
+
+    @test(keep=True, bind=True)
+    def bound_fixture_1(my_fix):
+        assert 34 == my_fix
+        return my_fix
+
+    assert 34 == bound_fixture_1() # no need to pass args, already bound
+
+    @test.fixture
+    def my_fix(): # redefine fixture purposely to test time of binding
+        yield 78
+
+    @test(keep=True, bind=True, skip=True) # skip, need more args
+    def bound_fixture_2(my_fix, result, *, extra=None):
+        assert 78 == my_fix
+        return result, extra
+
+    assert 34 == bound_fixture_1() # no need to pass args, already bound
+    assert (56, "top") == bound_fixture_2(56, extra="top") # no need to pass args, already bound
 
 import autotest
