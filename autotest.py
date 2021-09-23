@@ -65,27 +65,27 @@ class Runner:
     def __call__(self, f=None, **opts):
         """Decorator to define, run and report a test"""
         if opts:
-            return self._bind_options(**{**self.defaults, **opts})
-        bound_f = self._bind_options(**self.defaults)
-        bound_f(f)
+            return functools.partial(self._bind_options, **{**self.defaults, **opts})
+        return self._bind_options(f, **self.defaults)
 
 
-    def _bind_options(self, *, bind, skip, keep, **opts):
-        def _do_run(f):
-            stack_bound_f = bind_1_frame_back(f)
-            fxs = self._get_fixtures(f)
-            fixtures_bound_f = functools.partial(self._run, stack_bound_f, fxs, **opts)
-            if not skip:
-                fixtures_bound_f()
-            if not keep:
-                return
-            if bind:
-                return fixtures_bound_f
-            return stack_bound_f
-        return _do_run
+    def _bind_options(self, f, *, bind, skip, keep, **opts):
+        stack_bound_f = bind_1_frame_back(f)
+        fixtures_bound_f = functools.partial(
+                self._run,
+                stack_bound_f,
+                self._get_fixtures(f),
+                **opts)
+        if not skip:
+            fixtures_bound_f()
+        if not keep:
+            return
+        if bind:
+            return fixtures_bound_f
+        return functools.partial(self._run, stack_bound_f, (), **opts)
 
 
-    def _run(self, f, fxs, *args, report, **kwds):
+    def _run(self, f, fxs, *f_args, report, **f_kwds):
         print_msg = print if report else lambda *a, **k: None
         print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
         fx_values = (fx[2] for fx in fxs)
@@ -93,7 +93,7 @@ class Runner:
             if inspect.iscoroutinefunction(f):
                 asyncio.run(f(*fx_values), debug=True)
             else:
-                return f(*fx_values, *args, **kwds)
+                return f(*fx_values, *f_args, **f_kwds)
         except BaseException as e:
             et, ev, tb = sys.exc_info()
             print_msg()
@@ -704,7 +704,7 @@ class X:
         assert 'scope:D' == a
         assert 10 == b
         assert 11 == x
-        assert inspect.isfunction(C), C
+        assert callable(C), C
         assert 10 == abs(-10) # built-in
         assert 'module scope' == M
         assert 42 == fixture_A, fixture_A
@@ -722,8 +722,8 @@ class X:
             assert None == b
             assert 11 == x
             assert 13 == y
-            assert inspect.isfunction(C)
-            assert inspect.isfunction(D)
+            assert callable(C)
+            assert callable(D)
             assert C != D
             assert 10 == abs(-10) # built-in
             assert 42 == C(42)
@@ -744,8 +744,9 @@ class X:
     async def coroutines_can_also_see_attrs_from_classed_being_defined(f_A):
         assert v == f_A, f_A
 
+
 @test
-def def_scope():
+def access_closure_from_enclosing_def():
     a = 46              # accessing this in another function makes it a 'freevar', which needs a closure
     @test
     def access_a():
@@ -846,9 +847,20 @@ def idea_for_dumb_diffs():
 
 @test
 def bind_test_functions_to_their_fixtures():
+
     @test.fixture
     def my_fix():
         yield 34
+
+    @test(bind=False, skip=True, keep=True)
+    def not_bound_but_with_reporting(my_fix):
+        assert 56 == my_fix
+        return my_fix
+
+    with test.stdout as s:
+        not_bound_but_with_reporting(56)
+    assert "autotest  autotest  not_bound_but_with_reporting  \n" == s.getvalue(), repr(s.getvalue())
+
 
     @test(keep=True, bind=True)
     def bound_fixture_1(my_fix):
@@ -878,5 +890,35 @@ def bind_test_functions_to_their_fixtures():
             assert 34 == a
             return a
         assert 34 == bound_fixture_acces_class_locals()
+
+    test.default(bind=True, keep=True)
+
+    @test
+    def bound_by_default(my_fix):
+        assert 78 == my_fix
+        return my_fix
+
+    assert 78 == bound_by_default()
+
+    trace = []
+    @test.fixture
+    def enumerate():
+        trace.append('S')
+        yield 1
+        trace.append('ES')
+
+    @test(keep=True, skip=True, bind=True)
+    def rebind_on_every_call(enumerate):
+        return True
+
+    #assert [] == trace
+    #assert rebind_on_every_call()
+    #assert ['S', 'D'] == trace
+    #assert rebind_on_every_call()
+    #assert ['S', 'D', 'S', 'D'] == trace
+
+
+
+
 
 import autotest
