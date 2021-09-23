@@ -931,21 +931,23 @@ def fx_b(fx_a):
     yield 74
     trace.append("B end")
 
-def get_fixtures(fixtures, func, context):
-    return func(*(
-        context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
-            for name in inspect.signature(func).parameters if name in fixtures))
+def get_fixtures(fixtures, func, context, *args, **kwds):
+    return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
+                   for name in inspect.signature(func).parameters if name in fixtures),
+                *args, **kwds)
 
-def run_with_fixtures(fixtures, f):
+def run_with_fixtures(fixtures, f, *args, **kwds):
     with contextlib.ExitStack() as context:
-        return get_fixtures(fixtures, f, context)
+        return get_fixtures(fixtures, f, context, *args, **kwds)
 
-def test_a(fx_a, fx_b):
+def test_a(fx_a, fx_b, a, b=10):
     assert 67 == fx_a
     assert 74 == fx_b
+    assert 9 == a
+    assert 11 == b
     trace.append("test_a done")
 
-run_with_fixtures(run.fixtures, test_a)
+run_with_fixtures(run.fixtures, test_a, 9, b=11)
 
 assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
