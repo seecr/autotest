@@ -663,7 +663,6 @@ def bind_names(bindings, names, frame):
 
 def bind_1_frame_back(func):
     """ Binds the unbound vars in func to values found on the stack """
-    print(func.__code__.co_freevars)
     return types.FunctionType(
                func.__code__,                      # code
                bind_names(                         # globals
@@ -672,7 +671,7 @@ def bind_1_frame_back(func):
                    inspect.currentframe().f_back),
                func.__name__,                      # name
                func.__defaults__,                  # default arguments
-               func.__code__.co_freevars)          # closure/free vars
+               func.__closure__)                   # closure/free vars
 
 
 M = 'module scope'
@@ -745,6 +744,12 @@ class X:
     async def coroutines_can_also_see_attrs_from_classed_being_defined(f_A):
         assert v == f_A, f_A
 
+@test
+def def_scope():
+    a = 46              # accessing this in another function makes it a 'freevar', which needs a closure
+    @test
+    def access_a():
+        assert 46 == a
 
 
 @test.fixture
