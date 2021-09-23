@@ -65,11 +65,11 @@ class Runner:
     def __call__(self, f=None, **opts):
         """Decorator to define, run and report a test"""
         if opts:
-            return functools.partial(self._bind_options, **{**self.defaults, **opts})
-        return self._bind_options(f, **self.defaults)
+            return functools.partial(self._bind, **{**self.defaults, **opts})
+        return self._bind(f, **self.defaults)
 
 
-    def _bind_options(self, f, *, bind, skip, keep, **opts):
+    def _bind(self, f, *, bind, skip, keep, **opts):
         stack_bound_f = bind_1_frame_back(f)
         fixtures_bound_f = functools.partial(
                 self._run,
@@ -84,14 +84,13 @@ class Runner:
             return fixtures_bound_f
         return functools.partial(self._run, stack_bound_f, (), **opts)
 
-
     def _run(self, f, fxs, *f_args, report, **f_kwds):
         print_msg = print if report else lambda *a, **k: None
         print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
         fx_values = (fx[2] for fx in fxs)
         try:
             if inspect.iscoroutinefunction(f):
-                asyncio.run(f(*fx_values), debug=True)
+                asyncio.run(f(*fx_values, *f_args, **f_kwds), debug=True)
             else:
                 return f(*fx_values, *f_args, **f_kwds)
         except BaseException as e:
@@ -916,6 +915,39 @@ def bind_test_functions_to_their_fixtures():
     #assert ['S', 'D'] == trace
     #assert rebind_on_every_call()
     #assert ['S', 'D', 'S', 'D'] == trace
+
+run = Runner()
+trace = []
+
+@run.fixture
+def fx_a():
+    trace.append("A start")
+    yield 67
+    trace.append("A end")
+
+@run.fixture
+def fx_b(fx_a):
+    trace.append("B start")
+    yield 74
+    trace.append("B end")
+
+def get_fixtures(fixtures, func, context):
+    return func(*(
+        context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
+            for name in inspect.signature(func).parameters if name in fixtures))
+
+def run_with_fixtures(fixtures, f):
+    with contextlib.ExitStack() as context:
+        return get_fixtures(fixtures, f, context)
+
+def test_a(fx_a, fx_b):
+    assert 67 == fx_a
+    assert 74 == fx_b
+    trace.append("test_a done")
+
+run_with_fixtures(run.fixtures, test_a)
+
+assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
 
 
