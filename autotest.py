@@ -59,72 +59,13 @@ class Runner:
     def __init__(self, **opts):
         self.defaults = opts
         self.fixtures = {}
-        self.finalize_early = []
 
 
     def __call__(self, f=None, **opts):
-        """Decorator to define, run and report a test"""
+        """Decorator to define, run and report a test, with one-time options when given. """
         if opts:
-            return functools.partial(self._bind, **{**self.defaults, **opts})
-        return self._bind(f, **self.defaults)
-
-
-    def _bind(self, f, *, bind, skip, keep, **opts):
-        stack_bound_f = bind_1_frame_back(f)
-        fixtures_bound_f = functools.partial(
-                self._run,
-                stack_bound_f,
-                self.fixtures.copy(),
-                #self._get_fixtures(f),
-                **opts)
-        if not skip:
-            fixtures_bound_f()
-        if not keep:
-            return
-        if bind:
-            return fixtures_bound_f
-        return functools.partial(self._run, stack_bound_f, (), **opts)
-
-    def _run(self, f, fxs, *f_args, report, **f_kwds):
-        print_msg = print if report else lambda *a, **k: None
-        print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
-        try:
-            result = run_with_fixtures(fxs, f, *f_args, **f_kwds)
-            if inspect.iscoroutine(result):
-                asyncio.run(result)
-            return result
-        except BaseException:
-            et, ev, tb = sys.exc_info()
-            print_msg()
-            if ev.args == ():
-                #for fx in self.finalize_early:
-                #    list(fx)
-                traceback.print_exception(et, ev, tb.tb_next.tb_next)
-                post_mortem(tb)
-                exit(-1)
-            raise
-        #finally:
-        #    del self.finalize_early[:]
-
-        #fx_values = (fx[2] for fx in fxs)
-        #try:
-        #    if inspect.iscoroutinefunction(f):
-        #        asyncio.run(f(*fx_values, *f_args, **f_kwds), debug=True)
-        #    else:
-        #        return f(*fx_values, *f_args, **f_kwds)
-        #except BaseException as e:
-        #    et, ev, tb = sys.exc_info()
-        #    print_msg()
-        #    if e.args == ():
-        #        for fx in self.finalize_early:
-        #            list(fx)
-        #        traceback.print_exception(et, ev, tb.tb_next.tb_next)
-        #        post_mortem(tb)
-        #        exit(-1)
-        #    raise
-        #finally:
-        #    finalize_fixtures(fxs)
-        #    del self.finalize_early[:]
+            return functools.partial(_bind, self.fixtures, **{**self.defaults, **opts})
+        return _bind(self.fixtures, f, **self.defaults)
 
 
     def default(self, **kws):
@@ -138,23 +79,13 @@ class Runner:
             raise AssertionError(*args)
 
 
-    def fixture(self, func=None, finalize_early=False):
+    def fixture(self, func):
         """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
-           That value is used as argument to functions declaring the fixture in their args.
-           finalize_early means the fixture is finalized before pdb instead of at the very end."""
-        def register(f):
-            assert inspect.isgeneratorfunction(f), f
-            bound_f = bind_1_frame_back(f)
-            if finalize_early:
-                def register_early(*a, **k):
-                    gen = bound_f(*a, **k)
-                    self.finalize_early.append(gen)
-                    return gen
-                self.fixtures[f.__name__] = register_early
-            else:
-                self.fixtures[f.__name__] = bound_f
-            return bound_f
-        return register(func) if func else register
+           That value is used as argument to functions declaring the fixture in their args. """
+        assert inspect.isgeneratorfunction(func)
+        bound_f = bind_1_frame_back(func)
+        self.fixtures[func.__name__] = bound_f
+        return bound_f
 
 
     def diff(self, a, b):
@@ -172,7 +103,6 @@ class Runner:
             or it returns a context manager if name denotes a fixture. """
         if name in self.fixtures:
             fx = self.fixtures[name]
-            _, args = self._get_fixture_values(fx)
             fx = functools.partial(run_with_fixtures, self.fixtures, fx)
             return CollectArgsContextManager(fx)
         op = getattr(operator, name)
@@ -186,21 +116,50 @@ class Runner:
         return call_operator
 
 
-    def _get_fixtures(*_):
-        """ Return info about fixtures, recursively. Placeholder function during bootstrap. """
-        return []
-
-
-    def _get_fixture_values(self, f):
-        fxs = self._get_fixtures(f)
-        return fxs, (fx[2] for fx in fxs)
-
-
 test = Runner(**sys_defaults)
 
 
+def _bind(fixtures, f, *, bind, skip, keep, **opts):
+    """ Binds f to stack vars and fixtures and runs it immediately. """
+    stack_bound_f = bind_1_frame_back(f)
+    fixtures_bound_f = functools.partial(_run, stack_bound_f, fixtures.copy(), **opts)
+    if not skip:
+        fixtures_bound_f()
+    if not keep:
+        return
+    if bind:
+        return fixtures_bound_f
+    return functools.partial(_run, stack_bound_f, (), **opts)
+
+
+def _run(f, fixtures, *app_args, report, **app_kwds):
+    """ Runs f witg given fixtues and application args, reporting when necessary. """
+    print_msg = print if report else lambda *_, **__: None
+    print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
+    try:
+        result = run_with_fixtures(fixtures, f, *app_args, **app_kwds)
+        if inspect.iscoroutine(result):
+            asyncio.run(result, debug=True)
+        return result
+    except BaseException:
+        et, ev, tb = sys.exc_info()
+        print_msg()
+        #for info in inspect.getinnerframes(tb):
+        #    print(info)
+        #info = inspect.trace(9)[-2]
+        #for n, line in enumerate(info.code_context):
+        #    print(" -->" if n == info.index else "    ", line, end='')
+        if ev.args == ():
+            traceback.print_exception(et, ev, tb.tb_next.tb_next)
+            post_mortem(tb)
+            exit(-1)
+        raise
+
+
 def run_with_fixtures(_, f, *a, **k):
+    """ Bootstrapping, placeholder, overwritten later """
     return f(*a, **k)
+
 
 CollectArgsContextManager = contextlib.contextmanager
 """ Bootstrapping, placeholder, overwritten later """
@@ -216,11 +175,6 @@ def post_mortem(tb):
     p.rcLines.extend(['longlist'])
     p.reset()
     p.interaction(None, tb)
-
-
-def finalize_fixtures(fxs):
-    """ Exhaust all fixture generators, recursively. """
-    [(list(fx[1]), finalize_fixtures(fx[0])) for fx in fxs]
 
 
 class lazy_str:
@@ -289,6 +243,7 @@ def extra_args_supplying_contextmanager():
         assert ('a', 'b', 'c', 'd', 'e', 'f') == v, v
 
 
+""" bootstrapping: test and instal fixture support """
 run = Runner()
 trace = []
 
@@ -323,55 +278,6 @@ def test_a(fx_a, fx_b, a, b=10):
 run_with_fixtures(run.fixtures, test_a, 9, b=11)
 
 assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
-
-
-
-""" bootstrapping: test and instal fixture support """
-#@test
-def test_get_fixtures():
-    class X(Runner):
-        def _get_fixtures(self, f):
-            """ The real function, tested and then installed. Lambda is read as 'let'. """
-            return [(lambda fx=self.fixtures[name]:
-                        (lambda fxs=self._get_fixtures(fx):
-                            (lambda gen=fx(*(x[2] for x in fxs)):
-                                (fxs, gen, next(gen)))())())() for name in inspect.signature(f).parameters if name in self.fixtures]
-    x = X()
-    def f(): pass
-    assert [] == x._get_fixtures(f)
-    @x.fixture
-    def a(): yield 7
-    @x.fixture
-    def b(): yield 9
-    def f(a, b): pass
-    fxs, gen, v = x._get_fixtures(f)[0]
-    assert fxs == []
-    assert inspect.isgenerator(gen)
-    assert v == 7, v
-    fxs, gen, v = x._get_fixtures(f)[1]
-    assert fxs == []
-    assert inspect.isgenerator(gen)
-    assert v == 9, v
-    @x.fixture
-    def c(b): yield 13
-    def f(c): pass
-    fxs, gen, v = x._get_fixtures(f)[0]
-    assert 1 == len(fxs), fxs
-    assert inspect.isgenerator(gen)
-    assert v == 13, v
-    fxs, gen, v = fxs[0] # recursive
-    assert fxs == []
-    assert v == 9, v
-    @x.fixture
-    def d(c): yield 17
-    def f(d): pass
-    gs = x._get_fixtures(f)
-    fxs, gen, v = gs[0][0][0][0][0]
-    assert [] == fxs
-    assert inspect.isgenerator(gen)
-    assert v == 9, v
-    # everything OK, install it
-    Runner._get_fixtures = X._get_fixtures
 
 
 @test.fixture
@@ -492,6 +398,7 @@ def test_testop_has_args():
             x = 42
             y = 67
             test.eq(x, y)
+            return True
     except AssertionError as e:
         assert hasattr(e, 'args')
         assert 3 == len(e.args)
@@ -566,12 +473,12 @@ def capture(name):
         setattr(sys, name, org_stream)
 
 
-@test.fixture(finalize_early=True)
+@test.fixture
 def stdout():
     yield from capture('stdout')
 
 
-@test.fixture(finalize_early=True)
+@test.fixture
 def stderr():
     yield from capture('stderr')
 
