@@ -62,7 +62,7 @@ class Runner:
 
 
     def __call__(self, f=None, **opts):
-        'SKIP_TRACEBACK'
+        SKIP_TRACEBACK = 1
         """Decorator to define, run and report a test, with one-time options when given. """
         if opts:
             return functools.partial(_bind, self.fixtures, **{**self.defaults, **opts})
@@ -108,7 +108,7 @@ class Runner:
             return CollectArgsContextManager(fx)
         op = getattr(operator, name)
         def call_operator(*args, msg=None):
-            'SKIP_TRACEBACK'
+            SKIP_TRACEBACK = 1
             if not bool(op(*args)):
                 if msg:
                     raise AssertionError(msg(*args))
@@ -121,29 +121,31 @@ class Runner:
 test = Runner(**sys_defaults)
 
 
-def iterate(f, v):
-    while v:
-        yield v
-        v = f(v)
-
-
 def _bind(fixtures, f, *, bind, skip, keep, **opts):
     """ Binds f to stack vars and fixtures and runs it immediately. """
-    'SKIP_TRACEBACK'
+    SKIP_TRACEBACK = 1
     stack_bound_f = bind_1_frame_back(f)
-    fixtures_bound_f = functools.partial(_autotest_run_, stack_bound_f, fixtures.copy(), **opts)
+    fixtures_bound_f = functools.partial(_run, stack_bound_f, fixtures.copy(), **opts)
     if not skip:
         fixtures_bound_f()
     if not keep:
         return
     if bind:
         return fixtures_bound_f
-    return functools.partial(_autotest_run_, stack_bound_f, (), **opts)
+    return functools.partial(_run, stack_bound_f, (), **opts)
 
 
-def _autotest_run_(f, fixtures, *app_args, report, **app_kwds):
+def iterate(f, v):
+    if isinstance(f, str):
+        f = operator.attrgetter(f)
+    while v:
+        yield v
+        v = f(v)
+
+
+def _run(f, fixtures, *app_args, report, **app_kwds):
+    SKIP_TRACEBACK = 1
     """ Runs f witg given fixtues and application args, reporting when necessary. """
-    'SKIP_TRACEBACK'
     print_msg = print if report else lambda *_, **__: None
     print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
     try:
@@ -155,11 +157,9 @@ def _autotest_run_(f, fixtures, *app_args, report, **app_kwds):
         raise
     except BaseException:
         et, ev, tb = sys.exc_info()
-        for name in  (f[0].f_code.co_name for f in traceback.walk_stack(tb.tb_frame.f_back)):
-            if '_autotest_run_'  == name:
-                raise
-        filter_traceback(tb)
-        print_msg()
+        if _run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back)):
+            raise # leave handling to enclosing Runner to cause finalizing all fixtures, esp stdout
+        tb = filter_traceback(tb)
         if ev.args == ():
             traceback.print_exception(et, ev, tb)
             post_mortem(tb, 'longlist')
@@ -167,7 +167,8 @@ def _autotest_run_(f, fixtures, *app_args, report, **app_kwds):
         else:
             if report:
                 post_mortem(tb, 'longlist', 'exit')
-            raise
+            raise ev.with_traceback(tb)
+
 
 def filter_traceback(tb):
     """ Bootstrapping, placeholder, overwritten later """
@@ -278,13 +279,13 @@ def fx_b(fx_a):
     trace.append("B end")
 
 def get_fixtures(fixtures, func, context, *args, **kwds):
-    'SKIP_TRACEBACK'
+    SKIP_TRACEBACK = 1
     return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
                    for name in inspect.signature(func).parameters if name in fixtures),
                 *args, **kwds)
 
 def run_with_fixtures(fixtures, f, *args, **kwds):
-    'SKIP_TRACEBACK'
+    SKIP_TRACEBACK = 1
     with contextlib.ExitStack() as context:
         return get_fixtures(fixtures, f, context, *args, **kwds)
 
@@ -875,46 +876,96 @@ def bind_test_functions_to_their_fixtures():
     assert ['S', 'E', 'S', 'E'] == trace
 
 
-def filter_traceback(root, prev=None):
+def filter_traceback(root):
     def skip(tb):
-        return "SKIP_TRACEBACK" in tb.tb_frame.f_code.co_consts
+        return "SKIP_TRACEBACK" in tb.tb_frame.f_code.co_varnames
+    while root and skip(root):
+        root = root.tb_next
     tb = root
-    while tb:
-        if skip(tb):
-            if prev:
-                prev.tb_next = tb.tb_next
-            else:
-                root = tb.tb_next
-        prev = tb
-        tb = tb.tb_next
+    while tb and tb.tb_next:
+        if skip(tb.tb_next):
+           tb.tb_next = tb.tb_next.tb_next
+        else:
+           tb = tb.tb_next
     return root
 
 
 @test
 def trace_backfiltering():
     def eq(a, b):
-        'SKIP_TRACEBACK'
+        SKIP_TRACEBACK = 1
         assert a == b
 
     def B():
         eq(1, 2)
 
     def B_in_betwixt():
-        'SKIP_TRACEBACK'
+        SKIP_TRACEBACK = 1
         B()
 
     def A():
         B_in_betwixt()
 
-    test.contains(B_in_betwixt.__code__.co_consts, 'SKIP_TRACEBACK')
+    test.contains(B_in_betwixt.__code__.co_varnames, 'SKIP_TRACEBACK')
+
+    def test_names(*should):
+        _, _, tb = sys.exc_info()
+        tb = filter_traceback(tb)
+        names = tuple(tb.tb_frame.f_code.co_name for tb in iterate(lambda tb: tb.tb_next, tb))
+        assert should == names, names
+
+    try:
+        eq(1, 2)
+    except AssertionError:
+        test_names('trace_backfiltering')
+
+    try:
+        B()
+    except AssertionError:
+        test_names('trace_backfiltering', 'B')
+
+    try:
+        B_in_betwixt()
+    except AssertionError:
+        test_names('trace_backfiltering', 'B')
 
     try:
         A()
     except AssertionError:
-        et, ev, tb = sys.exc_info()
-        filter_traceback(tb)
-        names = list(tb.tb_frame.f_code.co_name for tb in iterate(lambda tb: tb.tb_next, tb))
-        assert ['trace_backfiltering', 'A', 'B'] == names, names
+        test_names('trace_backfiltering', 'A', 'B')
+
+    def C():
+        A()
+
+    def D():
+        SKIP_TRACEBACK = 1
+        C()
+
+    def E():
+        SKIP_TRACEBACK = 1
+        D()
+
+    try:
+        C()
+    except AssertionError:
+        test_names('trace_backfiltering', 'C', 'A', 'B')
+
+    try:
+        D()
+    except AssertionError:
+        test_names('trace_backfiltering', 'C', 'A', 'B')
+
+    try:
+        E()
+    except AssertionError:
+        test_names('trace_backfiltering', 'C', 'A', 'B')
+
+    try:
+        @test
+        def test_for_real_with_Runner_involved():
+            test.eq(1, 2)
+    except AssertionError:
+        test_names('trace_backfiltering', 'test_for_real_with_Runner_involved')
 
 
 if multiprocessing.current_process().name == "MainProcess":
