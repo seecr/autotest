@@ -1,34 +1,130 @@
-Autotest: Test Runner for Python
-================================
+Autotest: Simpler Test Runner for Python
+========================================
+
+Goals
+-----
+
+We want a simpler test runner. One that:
+
+ 1. works in a familiar way, 
+ 2. does not impose restrictions or enforce a way of coding,
+ 3. components do one thing each, and orthogonal to each other,
+ 4. fits into existing libraries, notably Python itself,
+ 5. keeps programmers close to their code,
+ 6. makes (large) refactorings easy,
+ 7. fits into a fast REPL-style way of working,
+ 8. seamlessly scales from microtests to systemtests,
+ 9. supports (continuous) integration,
+ 10. puts the programmer in control.
+
+That is a lot of requirements, but luckily this will fullfil all of them:
+
+'''python
+def some_function():
+  some_more()
+'''
+
+As long as out test runner is close to a simple Python function, we might achieve our goals.
+
+So, we  make a library of simple combinable functions.
+
 
 The Simplest Thing That Could Possibly Work
 -------------------------------------------
 
-Building large, robust, world class applications toughts us that we need simple, straightforward little tools, such as:
+1. Python's built-in `assert` is our starting point:
 
-1. terminal, shell, coreutils etc
-2. vi, with as few plugins as possible
-3. python
+   ```python
+   assert 1 == x, "x must be 1"
+   ```
 
-These tools work in a familiar way, and do one thing each. They keep programmers close to their code.
+   This is more profound than it seems.  Python's `assert` performs a test (simple truth value check) and immediately reports failure (by raising an AssertionError). In particular:
+   
+   1. there are no gathering, execution and reporting phases,
+   2. the first failure stops the program, and
+   3. discovering tests follows program execution
 
-For testing, we want a tool like that.
+   It can't be stressed enough how much these three points contribute to the goals above. Take a moment to reflect on this.
 
-
-Testing Vision
---------------
-
-1. Tests must be first class citizens: just code, and an inherent part of the application. Tests can do anything and are not limited in scope. A test could assert the presence of certain hardware and prope expected behavior. A test could also verify the proper startup of an application, given all dependencies, initialization etc. A test could do anything in between.
-
-2. Testing is not confined to a separate stage during development but may happen at any point in time, particularly also at runtime, for example during startup. Think of CPU's doing a self-test. Tests could also run while the application is running, for example when a new module is added dynamically.
-
-3. Testing may influence the way an application is structured and build (test-driven development already does this to a large extend) in order to facilitate testing. Testing support can be present in any part of the application, by means of test arguments, test functions, test classes, test modes, whatever is deemed necessary.
+   More on discovery later.
 
 
-The Simplest Solution
------------------
+2. `assert` raises AssertionError without info. For expressive asserts and improved reporting autotest has (read 'test' as a verb):
 
-1. Pythons `import` is enough to find all tests. This mechanism is well-known, transparent, hierarchical and order preserving. Importing a module causes all tests to be run as a prerequisite.
+   ```python
+   test.eq(1, x)
+   ```
+
+   This fetches `eq` from the built-in module `operator`,  applies it and raises AssertionError including the operation and its arguments. It works stand-alone, there is no requirement for a certain context.
+
+
+3. The second extension is a way to have simple fixtures (which are just context managers):
+   ```python
+   with test.tmp_path as p:
+      assert p.exists()
+
+   with test.raises(KeyError):
+      {}[1]
+   ```
+
+   These work in their own right. You could also use a context manager from contextlib. It is easy to create fixtures like the one used above:
+
+   ```python
+   @test.fixture
+   def raises(exception):
+     try:
+       yield
+     except exception:
+       pass
+     else:
+       raise AssertionError(f"should raise {exception.__name}")
+   ```
+
+   The fixtures are more versatile context managers as we see later.
+
+ 
+4. Functions provide more context to tests/asserts. A function explicitly marked with `@test` groups tests, report their succes as a whole and accepts options:
+
+  ```python
+      @test
+      def any_function(option=Value):
+          assert 1 == 2
+  ```
+
+   Read `@test` as a verb: the function is excuted immediately. Options at time of writing are:
+
+   1. keep    boolean  False   Keep the function after running instead of discading it.
+   2. skip    boolean  False   Skip running, False for parent, True for child processes.
+   3. report  boolean  True    Report the succes or be silent.
+
+
+5. Test functions can declare fixtures by specifying them as arguments, like is done in pyttest:
+
+  ```python
+    @test
+    def temp_file_usage(tmp_path):
+        path = tmp_path / 'ape'
+        path.write_text("hello")
+  ```
+
+
+  Sorry, WORK IN PROGRESS ahead
+
+
+
+AssertionError
+826  	@test
+827  	def msg():
+828  	    x = 2
+829  ->	    assert 1 == x
+> /home/seecr/development/autotest/autotest.py(829)msg()
+-> assert 1 == x
+(Pdb) p x
+2
+(Pdb)
+
+
+4. Pythons `import` is enough to find all tests. This mechanism is well-known, transparent, hierarchical and order preserving. Importing a module causes all tests to be run as a prerequisite.
 
   Runing all tests is simply done by importing:
 
@@ -42,35 +138,4 @@ The Simplest Solution
   ```
   or when you want to test a submodule and its dependencies, just import that submodule.
 
-2. Tests are normal functions, explicitly marked using a language feature: a decorator.
-  ```python
-      @test
-      def any_function():
-          assert 1 == 2
-  ```
-  The tests of autotest itself contain nice examples of what is possible using grouping in classes, bootstrapping, testing tests etc.
 
-3. Tests are executed (and reported) synchronously with program execution and stops at first failure. This gives focus and allows for starting a debugger at the right spot in your code, with all the context you need. It also allows for testing while parts of the application do not even compile yet (e.g. during refactoring).
-
-4. Simple fixtures are possible by specifying them as arguments, like is done in pyttest.
-  ```python
-    @fixture
-    def tmp_path():
-        p = pathlib.Path(tempfile.mkdtemp())
-        yield p
-        shutil.rmtree(p)
-
-    @test
-    def temp_file_usage(tmp_path):
-        path = tmp_path / 'ape'
-        path.write_text("hello")
-
-5. assert and test
-  Any AssertionError is dealt with, but using Python\'s `assert` does not give much information. It is recommended to raise AssertionErrors with at least arguments. A helpers exists to use `operator` and raise exceptions with the args set to the args of the operator.
-```python
-@test
-def use_test_operator():
-    test.eq(1, 1)
-    test.lt(1, 2) # etc
-```
-The `test` decorator doubles as a tool to invoke and assert any operator from Python `operator`.
