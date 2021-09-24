@@ -62,6 +62,7 @@ class Runner:
 
 
     def __call__(self, f=None, **opts):
+        'SKIP_TRACEBACK'
         """Decorator to define, run and report a test, with one-time options when given. """
         if opts:
             return functools.partial(_bind, self.fixtures, **{**self.defaults, **opts})
@@ -107,6 +108,7 @@ class Runner:
             return CollectArgsContextManager(fx)
         op = getattr(operator, name)
         def call_operator(*args, msg=None):
+            'SKIP_TRACEBACK'
             if not bool(op(*args)):
                 if msg:
                     raise AssertionError(msg(*args))
@@ -119,21 +121,29 @@ class Runner:
 test = Runner(**sys_defaults)
 
 
+def iterate(f, v):
+    while v:
+        yield v
+        v = f(v)
+
+
 def _bind(fixtures, f, *, bind, skip, keep, **opts):
     """ Binds f to stack vars and fixtures and runs it immediately. """
+    'SKIP_TRACEBACK'
     stack_bound_f = bind_1_frame_back(f)
-    fixtures_bound_f = functools.partial(_run, stack_bound_f, fixtures.copy(), **opts)
+    fixtures_bound_f = functools.partial(_autotest_run_, stack_bound_f, fixtures.copy(), **opts)
     if not skip:
         fixtures_bound_f()
     if not keep:
         return
     if bind:
         return fixtures_bound_f
-    return functools.partial(_run, stack_bound_f, (), **opts)
+    return functools.partial(_autotest_run_, stack_bound_f, (), **opts)
 
 
-def _run(f, fixtures, *app_args, report, **app_kwds):
+def _autotest_run_(f, fixtures, *app_args, report, **app_kwds):
     """ Runs f witg given fixtues and application args, reporting when necessary. """
+    'SKIP_TRACEBACK'
     print_msg = print if report else lambda *_, **__: None
     print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
     try:
@@ -141,19 +151,27 @@ def _run(f, fixtures, *app_args, report, **app_kwds):
         if inspect.iscoroutine(result):
             asyncio.run(result, debug=True)
         return result
+    except SystemExit:
+        raise
     except BaseException:
         et, ev, tb = sys.exc_info()
+        for name in  (f[0].f_code.co_name for f in traceback.walk_stack(tb.tb_frame.f_back)):
+            if '_autotest_run_'  == name:
+                raise
+        filter_traceback(tb)
         print_msg()
-        #for info in inspect.getinnerframes(tb):
-        #    print(info)
-        #info = inspect.trace(9)[-2]
-        #for n, line in enumerate(info.code_context):
-        #    print(" -->" if n == info.index else "    ", line, end='')
         if ev.args == ():
-            traceback.print_exception(et, ev, tb.tb_next.tb_next)
-            post_mortem(tb)
+            traceback.print_exception(et, ev, tb)
+            post_mortem(tb, 'longlist')
             exit(-1)
-        raise
+        else:
+            if report:
+                post_mortem(tb, 'longlist', 'exit')
+            raise
+
+def filter_traceback(tb):
+    """ Bootstrapping, placeholder, overwritten later """
+    pass
 
 
 def run_with_fixtures(_, f, *a, **k):
@@ -170,9 +188,9 @@ def bind_1_frame_back(_func_):
     return _func_
 
 
-def post_mortem(tb):
+def post_mortem(tb, *cmds):
     p = pdb.Pdb()
-    p.rcLines.extend(['longlist'])
+    p.rcLines.extend(cmds)
     p.reset()
     p.interaction(None, tb)
 
@@ -260,11 +278,13 @@ def fx_b(fx_a):
     trace.append("B end")
 
 def get_fixtures(fixtures, func, context, *args, **kwds):
+    'SKIP_TRACEBACK'
     return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
                    for name in inspect.signature(func).parameters if name in fixtures),
                 *args, **kwds)
 
 def run_with_fixtures(fixtures, f, *args, **kwds):
+    'SKIP_TRACEBACK'
     with contextlib.ExitStack() as context:
         return get_fixtures(fixtures, f, context, *args, **kwds)
 
@@ -511,6 +531,18 @@ def capture_stdout_child_processes(stdout):
 
 
 @test
+def reporting_tests(stdout):
+    try:
+        @test(report=False)
+        def test_no_reporting():
+            assert 1 != 1
+    except AssertionError:
+        pass
+    m = stdout.getvalue()
+    assert "" == m, m
+
+
+@test
 async def async_function():
     await asyncio.sleep(0)
     assert True
@@ -570,47 +602,6 @@ def child():
 
 def import_syntax_error():
     import sub_module_syntax_error
-
-
-if multiprocessing.current_process().name == "MainProcess":
-    @test
-    def silence_child_processes(stdout, stderr):
-        p = spawn(child) # <= causes import of all current modules
-        p.join()
-        # if it didn't load (e.g. SyntaxError), do not run test to avoid
-        # failures introduced by other modules that loaded as a result
-        # of multiprocessing spawn, but failed
-        if p.exitcode == 0:
-            out = stdout.getvalue()
-            test.contains(out, "I am a happy child")
-            test.not_("in_child" in out)
-
-
-    @test
-    def import_submodule(stdout):
-        import sub_module_ok
-        m = stdout.getvalue()
-        test.contains(m, "sub_module_ok")
-        test.contains(m, "test_one")
-        test.contains(m, "I am a happy submodule")
-
-
-    try:
-        @test
-        def import_submodule_is_silent_but_does_report_failures(stdout):
-            import sub_module_fail
-            test.eq("sub_module  test_one  I am a happy submodule\nOK\n", stdout.getvalue())
-        test.fail("Should have failed.")
-    except AssertionError as e:
-        assert "('eq', 123, 42)" == str(e), e
-
-
-    try:
-        @test
-        def import_syntax_error(stderr):
-            spawn(import_syntax_error).join()
-    except SyntaxError as e:
-        pass
 
 
 def bind_names(bindings, names, frame):
@@ -871,18 +862,111 @@ def bind_test_functions_to_their_fixtures():
     def enumerate():
         trace.append('S')
         yield 1
-        trace.append('ES')
+        trace.append('E')
 
     @test(keep=True, skip=True, bind=True)
     def rebind_on_every_call(enumerate):
         return True
 
-    #assert [] == trace
-    #assert rebind_on_every_call()
-    #assert ['S', 'D'] == trace
-    #assert rebind_on_every_call()
-    #assert ['S', 'D', 'S', 'D'] == trace
+    assert [] == trace
+    assert rebind_on_every_call()
+    assert ['S', 'E'] == trace
+    assert rebind_on_every_call()
+    assert ['S', 'E', 'S', 'E'] == trace
 
+
+def filter_traceback(root, prev=None):
+    def skip(tb):
+        return "SKIP_TRACEBACK" in tb.tb_frame.f_code.co_consts
+    tb = root
+    while tb:
+        if skip(tb):
+            if prev:
+                prev.tb_next = tb.tb_next
+            else:
+                root = tb.tb_next
+        prev = tb
+        tb = tb.tb_next
+    return root
+
+
+@test
+def trace_backfiltering():
+    def eq(a, b):
+        'SKIP_TRACEBACK'
+        assert a == b
+
+    def B():
+        eq(1, 2)
+
+    def B_in_betwixt():
+        'SKIP_TRACEBACK'
+        B()
+
+    def A():
+        B_in_betwixt()
+
+    test.contains(B_in_betwixt.__code__.co_consts, 'SKIP_TRACEBACK')
+
+    try:
+        A()
+    except AssertionError:
+        et, ev, tb = sys.exc_info()
+        filter_traceback(tb)
+        names = list(tb.tb_frame.f_code.co_name for tb in iterate(lambda tb: tb.tb_next, tb))
+        assert ['trace_backfiltering', 'A', 'B'] == names, names
+
+
+if multiprocessing.current_process().name == "MainProcess":
+    @test
+    def silence_child_processes(stdout, stderr):
+        p = spawn(child) # <= causes import of all current modules
+        p.join()
+        # if it didn't load (e.g. SyntaxError), do not run test to avoid
+        # failures introduced by other modules that loaded as a result
+        # of multiprocessing spawn, but failed
+        if p.exitcode == 0:
+            out = stdout.getvalue()
+            test.contains(out, "I am a happy child")
+            test.not_("in_child" in out)
+
+
+    @test
+    def import_submodule(stdout):
+        import sub_module_ok
+        m = stdout.getvalue()
+        test.contains(m, "sub_module_ok")
+        test.contains(m, "test_one")
+        test.contains(m, "I am a happy submodule")
+
+
+    try:
+        with test.stdout as s:
+            @test
+            def import_submodule_is_silent_but_does_report_failures():
+                import sub_module_fail
+        test.fail("Should have failed.")
+    except AssertionError as e:
+        m = s.getvalue()
+        test.contains(m, "5  ->	    autotest.test.eq(123, 42)", msg=lambda a, b: ''.join(a))
+        assert "('eq', 123, 42)" == str(e), e
+
+
+    try:
+        @test
+        def import_syntax_error(stderr):
+            spawn(import_syntax_error).join()
+    except SyntaxError as e:
+        pass
+
+
+
+#@test
+def probeer():
+    test.eq(1, 0)
+#@test
+def probeer():
+    assert 1 == 2
 
 
 import autotest
