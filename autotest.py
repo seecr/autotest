@@ -157,10 +157,11 @@ def _run(f, fixtures, *app_args, report, **app_kwds):
         raise
     except BaseException:
         et, ev, tb = sys.exc_info()
-        if _run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back)):
-            raise # leave handling to enclosing Runner to cause finalizing all fixtures, esp stdout
+        recursive = _run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
         tb = filter_traceback(tb)
         if ev.args == ():
+            if recursive:
+                raise
             traceback.print_exception(et, ev, tb)
             post_mortem(tb, 'longlist')
             exit(-1)
@@ -535,12 +536,30 @@ def capture_stdout_child_processes(stdout):
 def reporting_tests(stdout):
     try:
         @test(report=False)
-        def test_no_reporting():
+        def test_no_reporting_but_failure_raised():
             assert 1 != 1
-    except AssertionError:
-        pass
+        self.fail("should fail")
+    except AssertionError as e:
+        t, v, tb = sys.exc_info()
+        tbi = traceback.extract_tb(tb)
+        assert "test_no_reporting_but_failure_raised" == tbi[-1].name, tbi[-1].name
+        assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
     m = stdout.getvalue()
     assert "" == m, m
+
+
+    try:
+        @test
+        def test_with_reporting_and_failure_raised():
+            assert 1 != 1
+        self.fail("should fail")
+    except AssertionError:
+        t, v, tb = sys.exc_info()
+        tbi = traceback.extract_tb(tb)
+        assert "test_with_reporting_and_failure_raised" == tbi[-1].name, tbi[-1].name
+        assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
+    m = stdout.getvalue()
+    test.contains(m, "autotest  test_with_reporting_and_failure_raised")
 
 
 @test
