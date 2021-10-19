@@ -37,6 +37,8 @@ import multiprocessing
 import os
 import difflib
 import pprint
+import unittest.mock as mock
+
 
 
 __all__ = ['test', 'Runner']
@@ -1029,6 +1031,14 @@ if multiprocessing.current_process().name == "MainProcess":
     except SyntaxError as e:
         pass
 
+
+# helpers
+def mock_object(*functions, **more):
+    """ Creates an object from a bunch of functions.
+        Useful for testing methods from inside the class definition. """
+    self = mock.Mock()
+    self.configure_mock(**{f.__name__: types.MethodType(f, self) for f in functions}, **more)
+    return self
 
 
 #@test
