@@ -64,7 +64,7 @@ class Runner:
 
 
     def __call__(self, f=None, **opts):
-        SKIP_TRACEBACK = 1
+        AUTOTEST_INTERNAL = 1
         """Decorator to define, run and report a test, with one-time options when given. """
         if opts:
             return functools.partial(_bind, self.fixtures, **{**self.defaults, **opts})
@@ -110,7 +110,7 @@ class Runner:
             return CollectArgsContextManager(fx)
         op = getattr(operator, name)
         def call_operator(*args, msg=None):
-            SKIP_TRACEBACK = 1
+            AUTOTEST_INTERNAL = 1
             if not bool(op(*args)):
                 if msg:
                     raise AssertionError(msg(*args))
@@ -125,7 +125,7 @@ test = Runner(**sys_defaults)
 
 def _bind(fixtures, f, *, bind, skip, keep, **opts):
     """ Binds f to stack vars and fixtures and runs it immediately. """
-    SKIP_TRACEBACK = 1
+    AUTOTEST_INTERNAL = 1
     stack_bound_f = bind_1_frame_back(f)
     fixtures_bound_f = functools.partial(_run, stack_bound_f, fixtures.copy(), **opts)
     if not skip:
@@ -146,21 +146,21 @@ def iterate(f, v):
 
 
 def _run(f, fixtures, *app_args, report, **app_kwds):
-    SKIP_TRACEBACK = 1
+    AUTOTEST_INTERNAL = 1
     """ Runs f witg given fixtues and application args, reporting when necessary. """
     print_msg = print if report else lambda *_, **__: None
     print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
     try:
         result = run_with_fixtures(fixtures, f, *app_args, **app_kwds)
-        if inspect.iscoroutine(result):
-            asyncio.run(result, debug=True)
         return result
     except SystemExit:
         raise
     except BaseException:
         et, ev, tb = sys.exc_info()
         recursive = _run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
-        tb = filter_traceback(tb)
+        new_tb = filter_traceback(tb)
+        if new_tb is not None: # avoid our own tests to have no traceback left
+            tb = new_tb
         if ev.args == ():
             if recursive:
                 raise
@@ -282,15 +282,19 @@ def fx_b(fx_a):
     trace.append("B end")
 
 def get_fixtures(fixtures, func, context, *args, **kwds):
-    SKIP_TRACEBACK = 1
+    AUTOTEST_INTERNAL = 1
     return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
                    for name in inspect.signature(func).parameters if name in fixtures),
                 *args, **kwds)
 
 def run_with_fixtures(fixtures, f, *args, **kwds):
-    SKIP_TRACEBACK = 1
+    AUTOTEST_INTERNAL = 1
     with contextlib.ExitStack() as context:
-        return get_fixtures(fixtures, f, context, *args, **kwds)
+        result = get_fixtures(fixtures, f, context, *args, **kwds)
+        # if we move the check below to get_fixtures, we would have async fixtures; not sure what that would bring tho.
+        if inspect.iscoroutine(result):
+            return asyncio.run(result, debug=True)
+        return result
 
 def test_a(fx_a, fx_b, a, b=10):
     assert 67 == fx_a
@@ -306,9 +310,8 @@ assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end
 
 @test.fixture
 def tmp_path():
-    p = pathlib.Path(tempfile.mkdtemp())
-    yield p
-    shutil.rmtree(p)
+    with tempfile.TemporaryDirectory() as p:
+        yield pathlib.Path(p)
 
 
 fixture_lifetime = []
@@ -364,6 +367,10 @@ class tmp_files:
     path = None
 
     @test
+    def temp_sync(tmp_path):
+        assert tmp_path.exists()
+
+    @test
     def temp_file_removal(tmp_path):
         global path
         path = tmp_path / 'aap'
@@ -372,6 +379,10 @@ class tmp_files:
     @test
     def temp_file_gone():
         assert not path.exists()
+
+    @test
+    async def temp_async(tmp_path):
+        assert tmp_path.exists()
 
 
 @test
@@ -571,13 +582,18 @@ async def async_function():
 
 
 @test.fixture
-def raises(exception=Exception):
+def raises(exception=Exception, message=None):
     try:
         yield
-    except exception:
-        pass
+    except exception as e:
+        if message and message != str(e):
+            e = AssertionError(f"should raise {exception.__name__} with message '{message}'")
+            e.__suppress_context__ = True
+            raise e
     else:
-        raise AssertionError(f"should raise {exception.__name__}")
+        e = AssertionError(f"should raise {exception.__name__}")
+        e.__suppress_context__ = True
+        raise e
 
 
 @test
@@ -607,6 +623,17 @@ def assert_raises_specific_exception():
         assert 'should raise KeyError' == str(e), e
 
 
+@test
+def assert_raises_specific_message():
+    with test.raises(RuntimeError, "hey man!"):
+        raise RuntimeError("hey man!")
+    try:
+        with test.raises(RuntimeError, "hey woman!"):
+            raise RuntimeError("hey man!")
+    except AssertionError as e:
+        assert "should raise RuntimeError with message 'hey woman!'" == str(e)
+
+
 
 def spawn(f):
     ctx = multiprocessing.get_context('spawn')
@@ -626,17 +653,24 @@ def import_syntax_error():
     import sub_module_syntax_error
 
 
+def is_internal(frame):
+    return "AUTOTEST_INTERNAL" in frame.f_code.co_varnames
+
+
 def bind_names(bindings, names, frame):
     """ find names in locals on the stack and binds them """
     if not frame or not names:
         return bindings
-    f_locals = frame.f_locals # rather expensive
-    rest = []
-    for name in names:
-        try:
-            bindings[name] = f_locals[name]
-        except KeyError:
-            rest.append(name)
+    if not is_internal(frame):
+        f_locals = frame.f_locals # rather expensive
+        rest = []
+        for name in names:
+            try:
+                bindings[name] = f_locals[name]
+            except KeyError:
+                rest.append(name)
+    else:
+        rest = names
     return bind_names(bindings, rest, frame.f_back)
 
 
@@ -730,6 +764,13 @@ def access_closure_from_enclosing_def():
     @test
     def access_a():
         assert 46 == a
+
+
+f = 16
+
+@test
+def dont_confuse_app_vars_with_internal_vars():
+    assert 16 == f
 
 
 @test.fixture
@@ -898,13 +939,11 @@ def bind_test_functions_to_their_fixtures():
 
 
 def filter_traceback(root):
-    def skip(tb):
-        return "SKIP_TRACEBACK" in tb.tb_frame.f_code.co_varnames
-    while root and skip(root):
+    while root and is_internal(root.tb_frame):
         root = root.tb_next
     tb = root
     while tb and tb.tb_next:
-        if skip(tb.tb_next):
+        if is_internal(tb.tb_next.tb_frame):
            tb.tb_next = tb.tb_next.tb_next
         else:
            tb = tb.tb_next
@@ -914,20 +953,20 @@ def filter_traceback(root):
 @test
 def trace_backfiltering():
     def eq(a, b):
-        SKIP_TRACEBACK = 1
+        AUTOTEST_INTERNAL = 1
         assert a == b
 
     def B():
         eq(1, 2)
 
     def B_in_betwixt():
-        SKIP_TRACEBACK = 1
+        AUTOTEST_INTERNAL = 1
         B()
 
     def A():
         B_in_betwixt()
 
-    test.contains(B_in_betwixt.__code__.co_varnames, 'SKIP_TRACEBACK')
+    test.contains(B_in_betwixt.__code__.co_varnames, 'AUTOTEST_INTERNAL')
 
     def test_names(*should):
         _, _, tb = sys.exc_info()
@@ -959,11 +998,11 @@ def trace_backfiltering():
         A()
 
     def D():
-        SKIP_TRACEBACK = 1
+        AUTOTEST_INTERNAL = 1
         C()
 
     def E():
-        SKIP_TRACEBACK = 1
+        AUTOTEST_INTERNAL = 1
         D()
 
     try:
