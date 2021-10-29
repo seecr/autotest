@@ -61,14 +61,18 @@ class Runner:
     def __init__(self, **opts):
         self.defaults = opts
         self.fixtures = {}
+        self.count = 0
 
 
     def __call__(self, f=None, **opts):
         AUTOTEST_INTERNAL = 1
         """Decorator to define, run and report a test, with one-time options when given. """
-        if opts:
-            return functools.partial(_bind, self.fixtures, **{**self.defaults, **opts})
-        return _bind(self.fixtures, f, **self.defaults)
+        try:
+            if opts:
+                return functools.partial(_bind, self.fixtures, **{**self.defaults, **opts})
+            return _bind(self.fixtures, f, **self.defaults)
+        finally:
+            self.count += 1
 
 
     def default(self, **kws):
