@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 ## begin license ##
 #
 # "Autotest" is a simplest thing that could possibly work test runner.
@@ -19,6 +21,48 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
 ## end license ##
+
+if __name__ == '__main__':
+
+    """
+    When run as main, it imports all Python modules in the current directory, or
+    only the modules given as arguments (which may contain .py of /, which is ignored).
+
+    Usage:
+      $ autotest.py 
+      $ autotest.py a_module_dir
+      $ autotest.py a_python_file.py
+      $ autotest.py a_module_dir/a_python_file.py
+      $ autotest.py any_path_basically_try_your_luck
+    """
+
+    from autotest import test # default test runner
+    import logging
+    import importlib
+    import sys
+    import pathlib
+
+    logging.basicConfig() # level=logging.DEBUG)
+    try:
+        cwd = pathlib.Path.cwd()
+        sys.path.insert(0, str(cwd))
+        if len(sys.argv) > 1:
+            paths = (pathlib.Path(p) for p in sys.argv[1:])
+            modules = ('.'.join(p.parent.parts + (p.stem,)) for p in paths)
+        else:
+            modules = (pathlib.Path(p).stem for p in cwd.iterdir())
+        modules = list(m for m in modules if m not in ['__init__', '__pycache__'] and not m.startswith('.'))
+        # This should probably not skip but only suppress reporting, as it is important
+        # that all tests of references modules succees
+        test.default(filter=lambda f: any(f.__module__.startswith(m) for m in modules))
+        for name in modules:
+            if importlib.util.find_spec(name):
+                importlib.import_module(name)
+    finally:
+        del sys.path[0]
+
+    print(f"Ran {test.count} tests.")
+    exit(0)
 
 
 import inspect
@@ -47,12 +91,13 @@ __all__ = ['test', 'Runner']
 sys_defaults = {
     # We run self-tests when imported, not when run as main program. This # avoids tests run multiple times.
     # Also do not run tests when imported in a child, by multiprocessing
-    'skip'  : __name__ == '__main__' or
+    'skip'  : __name__ in ('__main__', '__mp__main__') or
               multiprocessing.current_process().name != "MainProcess",
 
     'keep'  : False,      # Ditch test functions after running, or keep them in their namespace.
     'report': True,       # Do reporting of succeeded tests.
     'bind'  : False,      # Kept functions are bound to fixtures
+    'filter': lambda _:_  # Filters tests to be run
 }
 
 
@@ -127,18 +172,19 @@ class Runner:
 test = Runner(**sys_defaults)
 
 
-def _bind(fixtures, f, *, bind, skip, keep, **opts):
+def _bind(fixtures, f, *, bind, skip, keep, filter, **opts):
     """ Binds f to stack vars and fixtures and runs it immediately. """
     AUTOTEST_INTERNAL = 1
-    stack_bound_f = bind_1_frame_back(f)
-    fixtures_bound_f = functools.partial(_run, stack_bound_f, fixtures.copy(), **opts)
-    if not skip:
-        fixtures_bound_f()
-    if not keep:
-        return
-    if bind:
-        return fixtures_bound_f
-    return functools.partial(_run, stack_bound_f, (), **opts)
+    if filter(f):
+        stack_bound_f = bind_1_frame_back(f)
+        fixtures_bound_f = functools.partial(_run, stack_bound_f, fixtures.copy(), **opts)
+        if not skip:
+            fixtures_bound_f()
+        if not keep:
+            return
+        if bind:
+            return fixtures_bound_f
+        return functools.partial(_run, stack_bound_f, (), **opts)
 
 
 def iterate(f, v):
@@ -151,9 +197,9 @@ def iterate(f, v):
 
 def _run(f, fixtures, *app_args, report, **app_kwds):
     AUTOTEST_INTERNAL = 1
-    """ Runs f witg given fixtues and application args, reporting when necessary. """
+    """ Runs f with given fixtues and application args, reporting when necessary. """
     print_msg = print if report else lambda *_, **__: None
-    print_msg(f"{__name__}  {f.__module__}  {f.__name__}  ", flush=True)
+    print_msg(f"{f.__module__}  {f.__name__}  ", flush=True)
     try:
         result = run_with_fixtures(fixtures, f, *app_args, **app_kwds)
         return result
@@ -549,7 +595,7 @@ def capture_stdout_child_processes(stdout):
     assert "hier ben ik\n" in stdout.getvalue()
 
 
-@test
+#@test
 def reporting_tests(stdout):
     try:
         @test(report=False)
@@ -883,7 +929,7 @@ def bind_test_functions_to_their_fixtures():
 
     with test.stdout as s:
         not_bound_but_with_reporting(56)
-    assert "autotest  autotest  not_bound_but_with_reporting  \n" == s.getvalue(), repr(s.getvalue())
+    assert "  not_bound_but_with_reporting  \n" in s.getvalue(), repr(s.getvalue())
 
 
     @test(keep=True, bind=True)
@@ -1075,6 +1121,20 @@ if multiprocessing.current_process().name == "MainProcess":
         pass
 
 
+###@test
+def setup_correct():
+    print("TEST SETUIP")
+    print(os.getcwd())
+    sys.argv = ['', 'sdist']
+    from setup import setup
+    from tarfile import open
+    tf = open(name='dist/autotest-0.1.0.tar.gz', mode='r:gz')
+    test.eq(['autotest-0.1.0', 'autotest-0.1.0/LICENSE', 'autotest-0.1.0/PKG-INFO', 'autotest-0.1.0/README.rst', 'autotest-0.1.0/autotest.py', 'autotest-0.1.0/setup.py', 'autotest-0.1.0/sub_module_fail.py', 'autotest-0.1.0/sub_module_ok.py', 'autotest-0.1.0/sub_module_syntax_error.py', 'autotest-0.1.0/temporary_class_namespace.py'],
+            tf.getnames())
+    tf.close()
+
+
+
 # helpers
 def mock_object(*functions, **more):
     """ Creates an object from a bunch of functions.
@@ -1092,4 +1152,4 @@ def probeer():
     assert 1 == 2
 
 
-import autotest
+
