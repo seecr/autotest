@@ -29,39 +29,48 @@ if __name__ == '__main__':
     only the modules given as arguments (which may contain .py of /, which is ignored).
 
     Usage:
-      $ autotest.py 
+      $ autotest.py
       $ autotest.py a_module_dir
       $ autotest.py a_python_file.py
       $ autotest.py a_module_dir/a_python_file.py
       $ autotest.py any_path_basically_try_your_luck
     """
 
-    from autotest import test # default test runner
-    import logging
     import importlib
     import sys
     import pathlib
+    import os
 
-    logging.basicConfig() # level=logging.DEBUG)
-    try:
-        cwd = pathlib.Path.cwd()
-        sys.path.insert(0, str(cwd))
-        if len(sys.argv) > 1:
-            paths = (pathlib.Path(p) for p in sys.argv[1:])
-            modules = ('.'.join(p.parent.parts + (p.stem,)) for p in paths)
-        else:
-            modules = (pathlib.Path(p).stem for p in cwd.iterdir())
-        modules = list(m for m in modules if m not in ['__init__', '__pycache__'] and not m.startswith('.'))
-        # This should probably not skip but only suppress reporting, as it is important
-        # that all tests of references modules succees
-        test.default(filter=lambda f: any(f.__module__.startswith(m) for m in modules))
-        for name in modules:
-            if importlib.util.find_spec(name):
+    cwd = pathlib.Path.cwd()
+    sys.path.insert(0, str(cwd))
+    if len(sys.argv) > 1:
+        modules = map(lambda p: '.'.join(p.parent.parts + (p.stem,)),
+                    map(pathlib.Path, sys.argv[1:]))
+    else:
+        modules = (pathlib.Path(p).stem for p in cwd.iterdir())
+    modules = [m for m in modules if m not in ['__init__', '__pycache__'] and not m.startswith('.')]
+
+    if 'autotest' not in modules:
+        os.environ['AUTOTEST_report'] = 'False'
+        print("silently", end=' ')
+    else:
+        modules.remove('autotest')
+
+    print("importing \033[1mautotest\033[0m")
+    from autotest import test # default test runner
+    test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True)
+
+    for qname in modules:
+        names = qname.split('.')
+        for l in range(len(names)):
+            name = '.'.join(names[:l+1])
+            if name in sys.modules:
+                print(f"already imported tests from \033[1m{name}\033[0m")
+            elif importlib.util.find_spec(name):
+                print(f"importing tests from \033[1m{name}\033[0m")
                 importlib.import_module(name)
-    finally:
-        del sys.path[0]
 
-    print(f"Ran {test.count} tests.")
+    print(f"Found \033[1m{test.found}\033[0m unique tests, ran \033[1m{test.ran}\033[0m, reported \033[1m{test.reported}\033[0m.")
     exit(0)
 
 
@@ -88,17 +97,19 @@ import unittest.mock as mock
 __all__ = ['test', 'Runner']
 
 
-sys_defaults = {
-    # We run self-tests when imported, not when run as main program. This # avoids tests run multiple times.
-    # Also do not run tests when imported in a child, by multiprocessing
-    'skip'  : __name__ in ('__main__', '__mp__main__') or
-              multiprocessing.current_process().name != "MainProcess",
+is_main_process = multiprocessing.current_process().name == "MainProcess"
 
+
+
+sys_defaults = {
+    'skip'  : not is_main_process or __name__ == '__mp_main__',
     'keep'  : False,      # Ditch test functions after running, or keep them in their namespace.
     'report': True,       # Do reporting of succeeded tests.
     'bind'  : False,      # Kept functions are bound to fixtures
-    'filter': lambda _:_  # Filters tests to be run
 }
+
+env_defaults = {k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')}
+sys_defaults.update(env_defaults)
 
 
 class Runner:
@@ -106,7 +117,9 @@ class Runner:
     def __init__(self, **opts):
         self.defaults = opts
         self.fixtures = {}
-        self.count = 0
+        self.found = 0
+        self.ran = 0
+        self.reported = 0
 
 
     def __call__(self, f=None, **opts):
@@ -114,10 +127,10 @@ class Runner:
         """Decorator to define, run and report a test, with one-time options when given. """
         try:
             if opts:
-                return functools.partial(_bind, self.fixtures, **{**self.defaults, **opts})
-            return _bind(self.fixtures, f, **self.defaults)
+                return functools.partial(self._bind, self.fixtures, **{**self.defaults, **opts})
+            return self._bind(self.fixtures, f, **self.defaults)
         finally:
-            self.count += 1
+            self.found += 1
 
 
     def default(self, **kws):
@@ -169,22 +182,52 @@ class Runner:
         return call_operator
 
 
-test = Runner(**sys_defaults)
-
-
-def _bind(fixtures, f, *, bind, skip, keep, filter, **opts):
-    """ Binds f to stack vars and fixtures and runs it immediately. """
-    AUTOTEST_INTERNAL = 1
-    if filter(f):
+    def _bind(self, fixtures, f, *, bind, skip, keep, **opts):
+        """ Binds f to stack vars and fixtures and runs it immediately. """
+        AUTOTEST_INTERNAL = 1
         stack_bound_f = bind_1_frame_back(f)
-        fixtures_bound_f = functools.partial(_run, stack_bound_f, fixtures.copy(), **opts)
-        if not skip:
+        fixtures_bound_f = functools.partial(self._run, stack_bound_f, fixtures.copy(), **opts)
+        if inspect.isfunction(skip) and not skip(f) or not skip:
             fixtures_bound_f()
         if not keep:
             return
         if bind:
             return fixtures_bound_f
-        return functools.partial(_run, stack_bound_f, (), **opts)
+        return functools.partial(self._run, stack_bound_f, (), **opts)
+
+
+    def _run(self, f, fixtures, *app_args, report, **app_kwds):
+        AUTOTEST_INTERNAL = 1
+        """ Runs f with given fixtues and application args, reporting when necessary. """
+        print_msg = print if report else lambda *_, **__: None
+        print_msg(f"{f.__module__}  {f.__name__}  ", flush=True)
+        if report:
+            self.reported += 1
+        try:
+            return run_with_fixtures(fixtures, f, *app_args, **app_kwds)
+        except SystemExit:
+            raise
+        except BaseException:
+            et, ev, tb = sys.exc_info()
+            recursive = self._run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
+            new_tb = filter_traceback(tb)
+            if new_tb is not None: # avoid our own tests to have no traceback left
+                tb = new_tb
+            if ev.args == ():
+                if recursive:
+                    raise
+                traceback.print_exception(et, ev, tb)
+                post_mortem(tb, 'longlist')
+                exit(-1)
+            else:
+                if report:
+                    post_mortem(tb, 'longlist', 'exit')
+                raise ev.with_traceback(tb)
+        finally:
+            self.ran += 1
+
+
+test = Runner(**sys_defaults)
 
 
 def iterate(f, v):
@@ -193,34 +236,6 @@ def iterate(f, v):
     while v:
         yield v
         v = f(v)
-
-
-def _run(f, fixtures, *app_args, report, **app_kwds):
-    AUTOTEST_INTERNAL = 1
-    """ Runs f with given fixtues and application args, reporting when necessary. """
-    print_msg = print if report else lambda *_, **__: None
-    print_msg(f"{f.__module__}  {f.__name__}  ", flush=True)
-    try:
-        result = run_with_fixtures(fixtures, f, *app_args, **app_kwds)
-        return result
-    except SystemExit:
-        raise
-    except BaseException:
-        et, ev, tb = sys.exc_info()
-        recursive = _run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
-        new_tb = filter_traceback(tb)
-        if new_tb is not None: # avoid our own tests to have no traceback left
-            tb = new_tb
-        if ev.args == ():
-            if recursive:
-                raise
-            traceback.print_exception(et, ev, tb)
-            post_mortem(tb, 'longlist')
-            exit(-1)
-        else:
-            if report:
-                post_mortem(tb, 'longlist', 'exit')
-            raise ev.with_traceback(tb)
 
 
 def filter_traceback(tb):
@@ -568,34 +583,35 @@ def stderr():
     yield from capture('stderr')
 
 
-@test
-def stdout_capture():
-    name = "Erik"
-    msgs = []
-    @test(report=False)
-    def capture_all(stdout, stderr):
-        print(f"Hello {name}!", file=sys.stdout)
-        print(f"Bye {name}!", file=sys.stderr)
-        msgs.extend([stdout.getvalue(), stderr.getvalue()])
-    assert "Hello Erik!\n" == msgs[0]
-    assert "Bye Erik!\n" == msgs[1]
+if is_main_process:
+    @test
+    def stdout_capture():
+        name = "Erik"
+        msgs = []
+        @test(report=False)
+        def capture_all(stdout, stderr):
+            print(f"Hello {name}!", file=sys.stdout)
+            print(f"Bye {name}!", file=sys.stderr)
+            msgs.extend([stdout.getvalue(), stderr.getvalue()])
+        test.eq("Hello Erik!\n", msgs[0])
+        test.eq("Bye Erik!\n", msgs[1])
+
+
+if is_main_process:
+    @test
+    def capture_stdout_child_processes(stdout):
+        def f():
+            @test(report=False, skip=False)
+            def in_child():
+                print("hier ben ik")
+                assert 1 == 1
+        p = multiprocessing.Process(target=f) # NB: forks
+        p.start()
+        p.join(1)
+        assert "hier ben ik\n" in stdout.getvalue()
 
 
 @test
-def capture_stdout_child_processes(stdout):
-    def f():
-        @test(report=False, skip=False)
-        def in_child():
-            print("hier ben ik")
-            assert 1 == 1
-    p = multiprocessing.Process(target=f)
-    p.start()
-    p.join()
-    # This gets fkd up if other output appears due to import done by multiprocessing spawn
-    assert "hier ben ik\n" in stdout.getvalue()
-
-
-#@test
 def reporting_tests(stdout):
     try:
         @test(report=False)
@@ -612,7 +628,7 @@ def reporting_tests(stdout):
 
 
     try:
-        @test
+        @test(report=True)
         def test_with_reporting_and_failure_raised():
             assert 1 != 1
         self.fail("should fail")
@@ -922,7 +938,7 @@ def bind_test_functions_to_their_fixtures():
     def my_fix():
         yield 34
 
-    @test(bind=False, skip=True, keep=True)
+    @test(bind=False, skip=True, keep=True, report=True)
     def not_bound_but_with_reporting(my_fix):
         assert 56 == my_fix
         return my_fix
@@ -1078,11 +1094,11 @@ def trace_backfiltering():
         test_names('trace_backfiltering', 'test_for_real_with_Runner_involved')
 
 
-if multiprocessing.current_process().name == "MainProcess":
+if is_main_process:
     @test
     def silence_child_processes(stdout, stderr):
         p = spawn(child) # <= causes import of all current modules
-        p.join()
+        p.join(3)
         # if it didn't load (e.g. SyntaxError), do not run test to avoid
         # failures introduced by other modules that loaded as a result
         # of multiprocessing spawn, but failed
@@ -1109,14 +1125,14 @@ if multiprocessing.current_process().name == "MainProcess":
         test.fail("Should have failed.")
     except AssertionError as e:
         m = s.getvalue()
-        test.contains(m, "5  ->	    autotest.test.eq(123, 42)", msg=lambda a, b: ''.join(a))
-        assert "('eq', 123, 42)" == str(e), e
+        test.contains(m, "5  ->	    autotest.test.eq(123, 42)")
+        test.eq("('eq', 123, 42)", str(e))
 
 
     try:
         @test
         def import_syntax_error(stderr):
-            spawn(import_syntax_error).join()
+            spawn(import_syntax_error).join(3)
     except SyntaxError as e:
         pass
 
