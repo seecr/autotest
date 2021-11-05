@@ -30,6 +30,8 @@
 
 if __name__ == '__main__':
 
+    # experimental main; not tested
+
     """
     When run as main, it imports all Python modules in the current directory, or
     only the modules given as arguments (which may contain .py of /, which is ignored).
@@ -63,10 +65,10 @@ if __name__ == '__main__':
     print("importing \033[1mautotest\033[0m")
     from autotest import test # default test runner
     test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True)
-    if 'autotest' not in modules:
-        test.reset()
-    else:
+    if 'autotest' in modules:
         modules.remove('autotest')
+    else:
+        test.reset()
 
     for qname in modules:
         names = qname.split('.')
