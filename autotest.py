@@ -22,6 +22,12 @@
 #
 ## end license ##
 
+
+
+# TODO
+# 2. if no args, find and run all modules from current dir, but recursively
+
+
 if __name__ == '__main__':
 
     """
@@ -53,12 +59,14 @@ if __name__ == '__main__':
     if 'autotest' not in modules:
         os.environ['AUTOTEST_report'] = 'False'
         print("silently", end=' ')
-    else:
-        modules.remove('autotest')
 
     print("importing \033[1mautotest\033[0m")
     from autotest import test # default test runner
     test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True)
+    if 'autotest' not in modules:
+        test.reset()
+    else:
+        modules.remove('autotest')
 
     for qname in modules:
         names = qname.split('.')
@@ -100,23 +108,25 @@ __all__ = ['test', 'Runner']
 is_main_process = multiprocessing.current_process().name == "MainProcess"
 
 
-
 sys_defaults = {
-    'skip'  : not is_main_process or __name__ == '__mp_main__',
-    'keep'  : False,      # Ditch test functions after running, or keep them in their namespace.
-    'report': True,       # Do reporting of succeeded tests.
-    'bind'  : False,      # Kept functions are bound to fixtures
+    'skip'    : not is_main_process or __name__ == '__mp_main__',
+    'keep'    : False,      # Ditch test functions after running, or keep them in their namespace.
+    'report'  : True,       # Do reporting when starting a test.
+    'bind'    : False,      # Kept functions are bound to fixtures
 }
 
-env_defaults = {k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')}
-sys_defaults.update(env_defaults)
+sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
 
 class Runner:
 
     def __init__(self, **opts):
-        self.defaults = opts
+        self.defaults = {**sys_defaults, **opts}
         self.fixtures = {}
+        self.reset()
+
+
+    def reset(self):
         self.found = 0
         self.ran = 0
         self.reported = 0
@@ -164,7 +174,7 @@ class Runner:
 
 
     def __getattr__(self, name):
-        """ test.eq(lhs, rhs) etc, any operator from module 'operator' really.
+        """ run.eq(lhs, rhs) etc, any operator from module 'operator' really.
             or it returns a context manager if name denotes a fixture. """
         if name in self.fixtures:
             fx = self.fixtures[name]
@@ -227,7 +237,7 @@ class Runner:
             self.ran += 1
 
 
-test = Runner(**sys_defaults)
+test = Runner() # default Runner
 
 
 def iterate(f, v):
@@ -248,8 +258,8 @@ def run_with_fixtures(_, f, *a, **k):
     return f(*a, **k)
 
 
-CollectArgsContextManager = contextlib.contextmanager
 """ Bootstrapping, placeholder, overwritten later """
+CollectArgsContextManager = contextlib.contextmanager
 
 
 def bind_1_frame_back(_func_):
@@ -271,9 +281,10 @@ class lazy_str:
         return self._f()
 
 
-# Example Tests
-from numbers import Number
+trace = []
 
+
+from numbers import Number
 class any_number:
     def __init__(self, lo, hi):
         self._lo = lo
@@ -283,7 +294,7 @@ class any_number:
 
 
 @test
-def AnyNumber():
+def example_test():
     assert any_number(1,10) == 1
     assert any_number(1,10) == 2
     assert any_number(1,10) == 5
@@ -331,27 +342,15 @@ def extra_args_supplying_contextmanager():
 
 
 """ bootstrapping: test and instal fixture support """
-run = Runner()
-trace = []
-
-@run.fixture
-def fx_a():
-    trace.append("A start")
-    yield 67
-    trace.append("A end")
-
-@run.fixture
-def fx_b(fx_a):
-    trace.append("B start")
-    yield 74
-    trace.append("B end")
-
+# redefine the placeholder
 def get_fixtures(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
     return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
                    for name in inspect.signature(func).parameters if name in fixtures),
                 *args, **kwds)
 
+
+# redefine the placeholder
 def run_with_fixtures(fixtures, f, *args, **kwds):
     AUTOTEST_INTERNAL = 1
     with contextlib.ExitStack() as context:
@@ -361,6 +360,21 @@ def run_with_fixtures(fixtures, f, *args, **kwds):
             return asyncio.run(result, debug=True)
         return result
 
+
+@test.fixture
+def fx_a():
+    trace.append("A start")
+    yield 67
+    trace.append("A end")
+
+
+@test.fixture
+def fx_b(fx_a):
+    trace.append("B start")
+    yield 74
+    trace.append("B end")
+
+
 def test_a(fx_a, fx_b, a, b=10):
     assert 67 == fx_a
     assert 74 == fx_b
@@ -368,25 +382,23 @@ def test_a(fx_a, fx_b, a, b=10):
     assert 11 == b
     trace.append("test_a done")
 
-run_with_fixtures(run.fixtures, test_a, 9, b=11)
+run_with_fixtures(test.fixtures, test_a, 9, b=11)
 
 assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
 
-@test.fixture
-def tmp_path():
-    with tempfile.TemporaryDirectory() as p:
-        yield pathlib.Path(p)
-
-
 fixture_lifetime = []
-
 
 @test.fixture
 def fixture_A():
     fixture_lifetime.append('A-live')
     yield 42
     fixture_lifetime.append('A-close')
+
+
+@test
+def with_one_fixture(fixture_A):
+    assert 42 == fixture_A, fixture_A
 
 
 @test.fixture
@@ -401,11 +413,6 @@ def fixture_C(fixture_B):
     fixture_lifetime.append('C-live')
     yield fixture_B * 3
     fixture_lifetime.append('C-close')
-
-
-@test
-def with_one_fixture(fixture_A):
-    assert 42 == fixture_A, fixture_A
 
 
 @test
@@ -425,6 +432,14 @@ class lifetime:
     @test
     def fixtures_livetime():
         assert ['A-live', 'B-live', 'C-live', 'C-close', 'B-close', 'A-close'] == fixture_lifetime, fixture_lifetime
+
+
+# define, test and install default fixture
+# do not use @test.fixture as we need to install this twice
+def tmp_path():
+    with tempfile.TemporaryDirectory() as p:
+        yield pathlib.Path(p)
+test.fixture(tmp_path)
 
 
 class tmp_files:
@@ -573,14 +588,18 @@ def capture(name):
         setattr(sys, name, org_stream)
 
 
-@test.fixture
+# define, test and install default fixture
+# do not use @test.fixture as we need to install this twice
 def stdout():
     yield from capture('stdout')
+test.fixture(stdout)
 
 
-@test.fixture
+# define, test and install default fixture
+# do not use @test.fixture as we need to install this twice
 def stderr():
     yield from capture('stderr')
+test.fixture(stderr)
 
 
 if is_main_process:
@@ -647,7 +666,8 @@ async def async_function():
     assert True
 
 
-@test.fixture
+# define, test and install default fixture
+# do not use @test.fixture as we need to install this twice
 def raises(exception=Exception, message=None):
     try:
         yield
@@ -660,6 +680,7 @@ def raises(exception=Exception, message=None):
         e = AssertionError(f"should raise {exception.__name__}")
         e.__suppress_context__ = True
         raise e
+test.fixture(raises)
 
 
 @test
@@ -987,6 +1008,7 @@ def bind_test_functions_to_their_fixtures():
     assert 78 == bound_by_default()
 
     trace = []
+
     @test.fixture
     def enumerate():
         trace.append('S')
@@ -1135,6 +1157,12 @@ if is_main_process:
             spawn(import_syntax_error).join(3)
     except SyntaxError as e:
         pass
+
+
+# keep only the standard fixtures; ditch test fixtures
+test.fixtures = {}
+for fx in (tmp_path, stdout, stderr, raises):
+    test.fixture(fx)
 
 
 ###@test

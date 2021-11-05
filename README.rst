@@ -6,7 +6,7 @@ Goals
 
 We want a simpler test runner. One that:
 
-#) works in a familiar way, 
+#) works in a familiar way,
 #) does not impose restrictions or enforce a way of coding,
 #) components do one thing each, and orthogonal to each other,
 #) fits into existing libraries, notably Python itself,
@@ -36,12 +36,12 @@ The Simplest Thing That Could Possibly Work
 1) Python's built-in `assert` is our starting point:
 
 .. code:: python
-   
+
    assert 1 == x, "x must be 1"
-   
+
 
 This is more profound than it seems.  Python's `assert` performs a test (simple truth value check) and immediately reports failure (by raising an AssertionError). In particular:
-   
+
 - there are no gathering, execution and reporting phases,
 - the first failure stops the program, and
 - discovering tests follows program execution
@@ -56,7 +56,7 @@ More on discovery later.
 .. code:: python
 
    test.eq(1, x)
-   
+
 This fetches ``eq`` from the built-in module ``operator``,  applies it and raises AssertionError including the operation and its arguments. It works stand-alone, there is no requirement for a certain context.
 
 
@@ -69,7 +69,7 @@ This fetches ``eq`` from the built-in module ``operator``,  applies it and raise
 
    with test.raises(KeyError):
       {}[1]
-   
+
 These work in their own right. You could also use a context manager from contextlib. It is easy to create fixtures like the one used above:
 
 .. code:: python
@@ -81,11 +81,11 @@ These work in their own right. You could also use a context manager from context
        pass
      else:
        raise AssertionError(f"should raise {exception.__name}")
-   
+
 
 The fixtures are more versatile context managers as we see later.
 
- 
+
 4) Functions provide more context to tests/asserts. A function explicitly marked with ``@test`` groups tests, report their succes as a whole and accepts options:
 
 .. code:: python
@@ -93,7 +93,7 @@ The fixtures are more versatile context managers as we see later.
       @test
       def any_function(option=Value):
           assert 1 == 2
-    
+
 
 Read ``@test`` as a verb: the function is excuted immediately. Options at time of writing are:
 
@@ -145,7 +145,7 @@ or when you module has ``__main__``:
 .. code:: sh
 
       $ python -c "import <module>"
-  
+
 or when you want to test a submodule and its dependencies, just import that submodule.
 
 
