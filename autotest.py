@@ -174,6 +174,27 @@ class Runner:
                         pprint.pformat(a).splitlines(),
                         pprint.pformat(b).splitlines())))
 
+    class Operator:
+        def __init__(self, test=bool):
+            self.test = test
+        def __getattr__(self, name):
+            op = getattr(operator, name)
+            def call_operator(*args, msg=None):
+                AUTOTEST_INTERNAL = 1
+                if not self.test(op(*args)):
+                    if msg:
+                        raise AssertionError(msg(*args))
+                    else:
+                        raise AssertionError(op.__name__, *args)
+                return True
+            return call_operator
+
+    @property
+    def comp(self):
+        return self.Operator(test=operator.not_)
+
+    complement = comp
+
 
     def __getattr__(self, name):
         """ run.eq(lhs, rhs) etc, any operator from module 'operator' really.
@@ -182,16 +203,7 @@ class Runner:
             fx = self.fixtures[name]
             fx = functools.partial(run_with_fixtures, self.fixtures, fx)
             return CollectArgsContextManager(fx)
-        op = getattr(operator, name)
-        def call_operator(*args, msg=None):
-            AUTOTEST_INTERNAL = 1
-            if not bool(op(*args)):
-                if msg:
-                    raise AssertionError(msg(*args))
-                else:
-                    raise AssertionError(op.__name__, *args)
-            return True
-        return call_operator
+        return getattr(self.Operator(), name)
 
 
     def _bind(self, fixtures, f, *, bind, skip, keep, **opts):
@@ -496,6 +508,16 @@ def test_fail():
         test.fail("plz fail", info="more")
     except AssertionError as e:
         assert "('plz fail', {'info': 'more'})" == str(e), e
+
+
+@test
+def not_operator():
+    test.comp.contains("abc", "d")
+    try:
+        test.comp.contains("abc", "b")
+        test.fail()
+    except AssertionError as e:
+        assert "('contains', 'abc', 'b')" == str(e), e
 
 
 # test.<op> is really just assert++ and does not need @test to run 'in'
