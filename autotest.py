@@ -48,6 +48,9 @@ if __name__ == '__main__':
     import sys
     import pathlib
     import os
+    import logging
+
+    logging.getLogger("asyncio").setLevel(logging.DEBUG)
 
     cwd = pathlib.Path.cwd()
     sys.path.insert(0, str(cwd))
@@ -177,11 +180,16 @@ class Runner:
     class Operator:
         def __init__(self, test=bool):
             self.test = test
-        def __getattr__(self, name):
-            op = getattr(operator, name)
+        def __getattr__(self, opname):
             def call_operator(*args, msg=None):
                 AUTOTEST_INTERNAL = 1
-                if not self.test(op(*args)):
+                try:
+                    op = getattr(operator, opname)
+                    actual_args = args
+                except AttributeError:
+                    op = getattr(args[0], opname)
+                    actual_args = args[1:]
+                if not self.test(op(*actual_args)):
                     if msg:
                         raise AssertionError(msg(*args))
                     else:
@@ -359,8 +367,9 @@ def extra_args_supplying_contextmanager():
 # redefine the placeholder
 def get_fixtures(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
-    return func(*(context.enter_context(get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
-                   for name in inspect.signature(func).parameters if name in fixtures),
+    return func(*(context.enter_context(
+                    get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
+                  for name in inspect.signature(func).parameters if name in fixtures),
                 *args, **kwds)
 
 
@@ -370,6 +379,7 @@ def run_with_fixtures(fixtures, f, *args, **kwds):
     with contextlib.ExitStack() as context:
         result = get_fixtures(fixtures, f, context, *args, **kwds)
         # if we move the check below to get_fixtures, we would have async fixtures; not sure what that would bring tho.
+        # TODO make fixtures async (yes, can be handy)
         if inspect.iscoroutine(result):
             return asyncio.run(result, debug=True)
         return result
@@ -448,6 +458,18 @@ class lifetime:
         assert ['A-live', 'B-live', 'C-live', 'C-close', 'B-close', 'A-close'] == fixture_lifetime, fixture_lifetime
 
 
+# Async fixtures require quite a refactoring as everything becomes async, but we still want
+# to support sync code.
+#@test.fixture
+#async def my_async_fixture():
+#    await asyncio.sleep(0)
+#    yield 'async-42'
+#
+#@test
+#async def async_fixtures(my_async_fixture):
+#    test.eq('async-42', my_async_fixture)
+
+
 # define, test and install default fixture
 # do not use @test.fixture as we need to install this twice
 def tmp_path():
@@ -518,6 +540,11 @@ def not_operator():
         test.fail()
     except AssertionError as e:
         assert "('contains', 'abc', 'b')" == str(e), e
+
+
+@test
+def call_method_as_operator():
+    test.endswith("aap", "ap")
 
 
 # test.<op> is really just assert++ and does not need @test to run 'in'
@@ -693,6 +720,7 @@ async def async_function():
 # define, test and install default fixture
 # do not use @test.fixture as we need to install this twice
 def raises(exception=Exception, message=None):
+    AUTOTEST_INTERNAL = 1
     try:
         yield
     except exception as e:
@@ -700,6 +728,10 @@ def raises(exception=Exception, message=None):
             e = AssertionError(f"should raise {exception.__name__} with message '{message}'")
             e.__suppress_context__ = True
             raise e
+    except BaseException as e:
+        e = AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}")
+        e.__suppress_context__ = True
+        raise e
     else:
         e = AssertionError(f"should raise {exception.__name__}")
         e.__suppress_context__ = True
@@ -725,8 +757,8 @@ def assert_raises_specific_exception():
     try:
         with test.raises(KeyError):
             raise RuntimeError('oops')
-    except RuntimeError as e:
-        assert 'oops' == str(e), e
+    except AssertionError as e:
+        assert 'should raise KeyError but raised RuntimeError' == str(e), str(e)
     try:
         with test.raises(KeyError):
             pass
@@ -765,7 +797,8 @@ def import_syntax_error():
 
 
 def is_internal(frame):
-    return "AUTOTEST_INTERNAL" in frame.f_code.co_varnames
+    return '<frozen importlib.' in frame.f_code.co_filename or \
+           'AUTOTEST_INTERNAL' in frame.f_code.co_varnames
 
 
 def bind_names(bindings, names, frame):
@@ -1181,6 +1214,15 @@ if is_main_process:
             spawn(import_syntax_error).join(3)
     except SyntaxError as e:
         pass
+
+class wildcard:
+    def __eq__(self, _):
+        return True
+test.any = wildcard()
+
+@test
+def wildcard_matching():
+    test.eq([test.any, 42], [16, 42])
 
 
 # keep only the standard fixtures; ditch test fixtures
