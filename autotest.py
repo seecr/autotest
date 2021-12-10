@@ -66,24 +66,31 @@ if __name__ == '__main__':
         print("silently", end=' ')
 
     print("importing \033[1mautotest\033[0m")
-    from autotest import test # default test runner
-    test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True)
-    if 'autotest' in modules:
-        modules.remove('autotest')
-    else:
-        test.reset()
+    from autotest import test, filter_traceback # default test runner
 
-    for qname in modules:
-        names = qname.split('.')
-        for l in range(len(names)):
-            name = '.'.join(names[:l+1])
-            if name in sys.modules:
-                print(f"already imported tests from \033[1m{name}\033[0m")
-            elif importlib.util.find_spec(name):
-                print(f"importing tests from \033[1m{name}\033[0m")
-                importlib.import_module(name)
+    # using import.import_module in asyncio somehow gives us the frozen tracebacks (which were
+    # removed in 2012, but yet showing up again in this case. Let's get rid of them.
+    def excepthook(t, v, tb):
+        sys.__excepthook__(t, v, filter_traceback(tb))
+    sys.excepthook = excepthook
 
-    print(f"Found \033[1m{test.found}\033[0m unique tests, ran \033[1m{test.ran}\033[0m, reported \033[1m{test.reported}\033[0m.")
+    with test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True):
+        if 'autotest' in modules:
+            modules.remove('autotest')
+        else:
+            test.reset()
+
+        for qname in modules:
+            names = qname.split('.')
+            for l in range(len(names)):
+                name = '.'.join(names[:l+1])
+                if name in sys.modules:
+                    print(f"already imported tests from \033[1m{name}\033[0m")
+                elif importlib.util.find_spec(name):
+                    print(f"importing tests from \033[1m{name}\033[0m")
+                    importlib.import_module(name)
+
+        print(f"Found \033[1m{test.found}\033[0m unique tests, ran \033[1m{test.ran}\033[0m, reported \033[1m{test.reported}\033[0m.")
     exit(0)
 
 
@@ -92,7 +99,6 @@ import traceback
 import types
 import pathlib
 import tempfile
-import shutil
 import sys
 import pdb
 import operator
@@ -118,6 +124,8 @@ sys_defaults = {
     'keep'    : False,      # Ditch test functions after running, or keep them in their namespace.
     'report'  : True,       # Do reporting when starting a test.
     'bind'    : False,      # Kept functions are bound to fixtures
+    'gather'  : False,      # Gather tests, use gathered() to get them
+    'timeout' : 2,          # asyncio task timeout
 }
 
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
@@ -126,7 +134,7 @@ sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items(
 class Runner:
 
     def __init__(self, **opts):
-        self.defaults = {**sys_defaults, **opts}
+        self._defaults = [{**sys_defaults, **opts}]
         self.fixtures = {}
         self.reset()
 
@@ -135,6 +143,7 @@ class Runner:
         self.found = 0
         self.ran = 0
         self.reported = 0
+        self._gathered = [[]]
 
 
     def __call__(self, f=None, **opts):
@@ -148,9 +157,30 @@ class Runner:
             self.found += 1
 
 
+    @contextlib.contextmanager
     def default(self, **kws):
         """ Set default options for next tests."""
-        self.defaults.update(kws)
+        self._defaults.append({**self.defaults, **kws})
+        try:
+            with self: # also create new gathering context
+                yield self
+        finally:
+            self._defaults.pop()
+
+    @property
+    def defaults(self):
+        return self._defaults[-1]
+
+    @property
+    def gathered(self):
+        return self._gathered[-1]
+
+    def __enter__(self):
+        self._gathered.append([])
+        return self
+
+    def __exit__(self, *_):
+        self._gathered.pop()
 
 
     def fail(self, *args, **kwds):
@@ -209,26 +239,25 @@ class Runner:
             or it returns a context manager if name denotes a fixture. """
         if name in self.fixtures:
             fx = self.fixtures[name]
-            fx = functools.partial(run_with_fixtures, self.fixtures, fx)
+            fx = functools.partial(run_with_fixtures, self.fixtures, fx, 1) # TODO fixed timeout
             return CollectArgsContextManager(fx)
         return getattr(self.Operator(), name)
 
 
-    def _bind(self, fixtures, f, *, bind, skip, keep, **opts):
+    def _bind(self, fixtures, f, *, bind, skip, keep, gather, **opts):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
         stack_bound_f = bind_1_frame_back(f)
         fixtures_bound_f = functools.partial(self._run, stack_bound_f, fixtures.copy(), **opts)
         if inspect.isfunction(skip) and not skip(f) or not skip:
             fixtures_bound_f()
-        if not keep:
-            return
-        if bind:
-            return fixtures_bound_f
-        return functools.partial(self._run, stack_bound_f, (), **opts)
+        result_f = fixtures_bound_f if bind else functools.partial(self._run, stack_bound_f, (), **opts)
+        if gather:
+            self.gathered.append(result_f)
+        return result_f if keep else None
 
 
-    def _run(self, f, fixtures, *app_args, report, **app_kwds):
+    def _run(self, f, fixtures, *app_args, timeout, report, **app_kwds):
         AUTOTEST_INTERNAL = 1
         """ Runs f with given fixtues and application args, reporting when necessary. """
         print_msg = print if report else lambda *_, **__: None
@@ -236,7 +265,7 @@ class Runner:
         if report:
             self.reported += 1
         try:
-            return run_with_fixtures(fixtures, f, *app_args, **app_kwds)
+            return run_with_fixtures(fixtures, f, timeout, *app_args, **app_kwds)
         except SystemExit:
             raise
         except BaseException:
@@ -246,14 +275,17 @@ class Runner:
             if new_tb is not None: # avoid our own tests to have no traceback left
                 tb = new_tb
             if ev.args == ():
-                if recursive:
+                if recursive: # unwind stack to finalize all fixtures before post_portem
                     raise
                 traceback.print_exception(et, ev, tb)
                 post_mortem(tb, 'longlist')
                 exit(-1)
             else:
+                # TODO put this in sys.excepthook, to avoid printing it twice
+                #      might be a bit complicated 
                 if report:
                     post_mortem(tb, 'longlist', 'exit')
+                # NB: this could be raised in a wrapping test, or be the last one
                 raise ev.with_traceback(tb)
         finally:
             self.ran += 1
@@ -275,7 +307,7 @@ def filter_traceback(tb):
     pass
 
 
-def run_with_fixtures(_, f, *a, **k):
+def run_with_fixtures(_, f, timeout, *a, **k):
     """ Bootstrapping, placeholder, overwritten later """
     return f(*a, **k)
 
@@ -373,15 +405,47 @@ def get_fixtures(fixtures, func, context, *args, **kwds):
                 *args, **kwds)
 
 
+# using import.import_module in asyncio somehow gives us the frozen tracebacks (which were
+# removed in 2012, but yet showing up again in this case. Let's get rid of them.
+def asyncio_filtering_exception_handler(loop, context):
+    if 'source_traceback' in context:
+        context['source_traceback'] = [t for t in context['source_traceback'] if '<frozen ' not in t.filename]
+    return loop.default_exception_handler(context)
+
+
+# get the type of Traceback objects
+try: raise Exception
+except Exception as e:
+    Traceback = type(e.__traceback__)
+
+
+def frame_to_traceback(tb_frame, tb_next=None):
+    tb = Traceback(tb_next, tb_frame, tb_frame.f_lasti, tb_frame.f_lineno)
+    return create_traceback(tb_frame.f_back, tb) if tb_frame.f_back else tb
+
+
 # redefine the placeholder
-def run_with_fixtures(fixtures, f, *args, **kwds):
+def run_with_fixtures(fixtures, f, timeout,  *args, **kwds):
     AUTOTEST_INTERNAL = 1
     with contextlib.ExitStack() as context:
         result = get_fixtures(fixtures, f, context, *args, **kwds)
         # if we move the check below to get_fixtures, we would have async fixtures; not sure what that would bring tho.
-        # TODO make fixtures async (yes, can be handy)
+        # TODO make fixtures also async (yes, can be handy)
         if inspect.iscoroutine(result):
-            return asyncio.run(result, debug=True)
+            async def with_timeout():
+                loop = asyncio.get_running_loop()
+                loop.set_exception_handler(asyncio_filtering_exception_handler)
+                AUTOTEST_INTERNAL = 1
+                done, pending = await asyncio.wait([result], timeout=timeout)
+                for d in done:
+                    await d
+                if pending:
+                    n = len(pending)
+                    p = pending.pop() # one problem at a time
+                    s = p.get_stack() # "only one stack frame is returned for a suspended coroutine"
+                    tb1 = frame_to_traceback(s[-1])
+                    raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
+            return asyncio.run(with_timeout(), debug=True)
         return result
 
 
@@ -406,7 +470,7 @@ def test_a(fx_a, fx_b, a, b=10):
     assert 11 == b
     trace.append("test_a done")
 
-run_with_fixtures(test.fixtures, test_a, 9, b=11)
+run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
 
 assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
@@ -571,20 +635,69 @@ def test_testop_has_args():
         test.eq("('eq', 42, 67)", str(e))
 
 
-@test
-def skip_until():
-    test.default(skip=True)
+with test.default(report=False):
     @test
-    def fails():
-        test.eq(1, 2)
-    test.default(skip=False)
-    try:
-        @test(report=False)
-        def fails():
-            test.gt(1, 2)
-        test.fail()
-    except AssertionError as e:
-        test.eq("('gt', 1, 2)", str(e))
+    def nested_defaults():
+        dflts0 = test.defaults
+        assert not dflts0['skip']
+        assert not dflts0['report']
+        with test.default(skip=True, report=True):
+            dflts1 = test.defaults
+            assert dflts1['skip']
+            assert dflts1['report']
+            @test
+            def fails_but_is_skipped():
+                test.eq(1, 2)
+            try:
+                with test.default(skip=False, report=False) as TeSt:
+                    dflts2 = TeSt.defaults
+                    assert not dflts2['skip']
+                    assert not dflts2['report']
+                    @TeSt
+                    def fails_but_is_not_reported():
+                        TeSt.gt(1, 2)
+                    test.fail()
+                assert test.defaults == dflts1
+            except AssertionError as e:
+                test.eq("('gt', 1, 2)", str(e))
+        assert test.defaults == dflts0
+
+@test
+def gather_tests():
+    with test.default(gather=True):
+
+        @test.fixture
+        def a_fixture():
+            yield 16
+
+        @test(bind=False, skip=True)
+        def t0(a_fixture): return f'this is t0, with {a_fixture}'
+
+        with test:
+            @test
+            def sub0(): return 78
+            subsuite0 = test.gathered
+
+        with test.default(report=True):
+            @test
+            def sub1(): return 56
+            subsuite1 = test.gathered
+
+        @test(bind=True)
+        def t1(a_fixture): return f'this is t1, with {a_fixture}'
+
+        @test(gather=False)
+        def t2(): pass
+
+        suite = test.gathered
+
+    test.eq(1, len(subsuite0))
+    test.eq(78, subsuite0[0]())
+    test.eq(1, len(subsuite1))
+    test.eq(56, subsuite1[0]())
+    test.eq(2, len(suite))
+    test.eq('this is t0, with 42', suite[0](42))
+    test.eq('this is t1, with 16', suite[1]())
 
 
 @test
@@ -682,36 +795,6 @@ if is_main_process:
 
 
 @test
-def reporting_tests(stdout):
-    try:
-        @test(report=False)
-        def test_no_reporting_but_failure_raised():
-            assert 1 != 1
-        self.fail("should fail")
-    except AssertionError as e:
-        t, v, tb = sys.exc_info()
-        tbi = traceback.extract_tb(tb)
-        assert "test_no_reporting_but_failure_raised" == tbi[-1].name, tbi[-1].name
-        assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
-    m = stdout.getvalue()
-    assert "" == m, m
-
-
-    try:
-        @test(report=True)
-        def test_with_reporting_and_failure_raised():
-            assert 1 != 1
-        self.fail("should fail")
-    except AssertionError:
-        t, v, tb = sys.exc_info()
-        tbi = traceback.extract_tb(tb)
-        assert "test_with_reporting_and_failure_raised" == tbi[-1].name, tbi[-1].name
-        assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
-    m = stdout.getvalue()
-    test.contains(m, "autotest  test_with_reporting_and_failure_raised")
-
-
-@test
 async def async_function():
     await asyncio.sleep(0)
     assert True
@@ -797,7 +880,7 @@ def import_syntax_error():
 
 
 def is_internal(frame):
-    return '<frozen importlib.' in frame.f_code.co_filename or \
+    return '<frozen ' in frame.f_code.co_filename or \
            'AUTOTEST_INTERNAL' in frame.f_code.co_varnames
 
 
@@ -980,9 +1063,9 @@ def idea_for_dumb_diffs():
     # diff should accept the args preceeding it
     # str is called on the result, so you can make it lazy
     try:
-        test.eq("aap", "ape", msg=lambda x, y: "mydiff")
+        test.eq("aap", "ape", msg=lambda x, y: f"{x} mydiff {y}")
     except AssertionError as e:
-        assert "mydiff" == str(e)
+        assert "aap mydiff ape" == str(e)
 
     try:
         test.eq(a, b, msg=test.diff)
@@ -1055,14 +1138,14 @@ def bind_test_functions_to_their_fixtures():
             return a
         assert 34 == bound_fixture_acces_class_locals()
 
-    test.default(bind=True, keep=True)
+    with test.default(bind=True, keep=True):
 
-    @test
-    def bound_by_default(my_fix):
-        assert 78 == my_fix
-        return my_fix
+        @test
+        def bound_by_default(my_fix):
+            assert 78 == my_fix
+            return my_fix
 
-    assert 78 == bound_by_default()
+        assert 78 == bound_by_default()
 
     trace = []
 
@@ -1215,26 +1298,75 @@ if is_main_process:
     except SyntaxError as e:
         pass
 
+
+    with test.default(report=True):
+        with test.stdout as s:
+            try:
+                @test(timeout=0.1)
+                async def timeouts_test():
+                    await asyncio.sleep(1)
+                assert False, "should have raised timeout"
+            except asyncio.TimeoutError as e:
+                assert "Hanging task (1 of 1)" in str(e), e
+                tb = s.getvalue()
+                assert "timeouts_test" in tb, tb
+                assert "await asyncio.sleep(1)" in tb, tb
+
+
+
+
+# We put this test last, as it captures output an thus fails when using print
+@test
+def reporting_tests(stdout):
+    try:
+        @test(report=False)
+        def test_no_reporting_but_failure_raised():
+            assert 1 != 1
+        self.fail("should fail")
+    except AssertionError as e:
+        t, v, tb = sys.exc_info()
+        tbi = traceback.extract_tb(tb)
+        assert "test_no_reporting_but_failure_raised" == tbi[-1].name, tbi[-1].name
+        assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
+    m = stdout.getvalue()
+    assert "" == m, m
+
+
+    try:
+        @test(report=True)
+        def test_with_reporting_and_failure_raised():
+            assert 1 != 1
+        self.fail("should fail")
+    except AssertionError:
+        t, v, tb = sys.exc_info()
+        tbi = traceback.extract_tb(tb)
+        assert "test_with_reporting_and_failure_raised" == tbi[-1].name, tbi[-1].name
+        assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
+    m = stdout.getvalue()
+    test.contains(m, "autotest  test_with_reporting_and_failure_raised")
+
+
 class wildcard:
     def __eq__(self, _):
         return True
 test.any = wildcard()
+
 
 @test
 def wildcard_matching():
     test.eq([test.any, 42], [16, 42])
 
 
-# keep only the standard fixtures; ditch test fixtures
-test.fixtures = {}
+
+# clean up the default test runner and (re)install default fixtures
+#test.reset()
 for fx in (tmp_path, stdout, stderr, raises):
     test.fixture(fx)
 
 
+
 ###@test
 def setup_correct():
-    print("TEST SETUIP")
-    print(os.getcwd())
     sys.argv = ['', 'sdist']
     from setup import setup
     from tarfile import open
@@ -1252,14 +1384,3 @@ def mock_object(*functions, **more):
     self = mock.Mock()
     self.configure_mock(**{f.__name__: types.MethodType(f, self) for f in functions}, **more)
     return self
-
-
-#@test
-def probeer():
-    test.eq(1, 0)
-#@test
-def probeer():
-    assert 1 == 2
-
-
-
