@@ -26,6 +26,8 @@
 
 # TODO
 # 2. if no args, find and run all modules from current dir, but recursively
+# 3. run ALL test, including depedencies (so handy, reenable this functionality)
+# 4. old behaviour (skip dependencies) via argument??
 
 
 if __name__ == '__main__':
@@ -48,9 +50,6 @@ if __name__ == '__main__':
     import sys
     import pathlib
     import os
-    import logging
-
-    logging.getLogger("asyncio").setLevel(logging.DEBUG)
 
     cwd = pathlib.Path.cwd()
     sys.path.insert(0, str(cwd))
@@ -192,7 +191,7 @@ class Runner:
     def fixture(self, func):
         """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
            That value is used as argument to functions declaring the fixture in their args. """
-        assert inspect.isgeneratorfunction(func)
+        assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
         bound_f = bind_1_frame_back(func)
         self.fixtures[func.__name__] = bound_f
         return bound_f
@@ -239,8 +238,12 @@ class Runner:
             or it returns a context manager if name denotes a fixture. """
         if name in self.fixtures:
             fx = self.fixtures[name]
-            fx = functools.partial(run_with_fixtures, self.fixtures, fx, 1) # TODO fixed timeout
-            return CollectArgsContextManager(fx)
+            fx_bound = functools.partial(run_with_fixtures, self.fixtures, fx, 1) # TODO fixed timeout
+            if inspect.isgeneratorfunction(fx):
+                return CollectArgsContextManager(fx_bound)
+            if inspect.isasyncgenfunction(fx):
+                return CollectArgsAsyncContextManager(fx_bound)
+            raise ValueError(f"not an (async) generator: {fx}")
         return getattr(self.Operator(), name)
 
 
@@ -364,8 +367,10 @@ def example_test():
 
 
 def _(): yield
+async def _a(): yield
 ContextManagerType = type(contextlib.contextmanager(_)())
-del _
+AsyncContextManagerType = type(contextlib.asynccontextmanager(_a)())
+del _, _a
 
 
 class CollectArgsContextManager(ContextManagerType):
@@ -382,6 +387,23 @@ class CollectArgsContextManager(ContextManagerType):
     def __enter__(self):
         self.gen = self.func(*self.args, **self.kwds)
         return super().__enter__()
+
+
+# NB !!
+# This is partial and untested support for async fixtures
+# Until I understand what I am doing, it will not be supported.
+class CollectArgsAsyncContextManager(AsyncContextManagerType):
+    def __init__(self, f, *args, **kwds):
+        self.func = f
+        self.args = args
+        self.kwds = kwds
+    def __call__(self, *args, **kwds):
+        self.args += args
+        self.kwds.update(kwds)
+        return self
+    async def __aenter__(self):
+        self.gen = self.func(*self.args, **self.kwds)
+        return await super().__aenter__()
 
 
 @test
@@ -587,11 +609,13 @@ def new_assert():
 def test_fail():
     try:
         test.fail("plz fail")
+        raise AssertionError('FAILED to fail')
     except AssertionError as e:
         assert "plz fail" == str(e), e
 
     try:
         test.fail("plz fail", info="more")
+        raise AssertionError('FAILED to fail')
     except AssertionError as e:
         assert "('plz fail', {'info': 'more'})" == str(e), e
 
@@ -1305,7 +1329,7 @@ if is_main_process:
                 @test(timeout=0.1)
                 async def timeouts_test():
                     await asyncio.sleep(1)
-                assert False, "should have raised timeout"
+                    assert False, "should have raised timeout"
             except asyncio.TimeoutError as e:
                 assert "Hanging task (1 of 1)" in str(e), e
                 tb = s.getvalue()
