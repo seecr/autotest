@@ -239,6 +239,7 @@ class Runner:
         if name in self.fixtures:
             fx = self.fixtures[name]
             fx_bound = functools.partial(run_with_fixtures, self.fixtures, fx, 1) # TODO fixed timeout
+            print("FIXTURE:", name)
             if inspect.isgeneratorfunction(fx):
                 return CollectArgsContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
@@ -404,6 +405,9 @@ class CollectArgsAsyncContextManager(AsyncContextManagerType):
     async def __aenter__(self):
         self.gen = self.func(*self.args, **self.kwds)
         return await super().__aenter__()
+    @property
+    def __enter__(self):
+        raise Exception(f"Use 'async with' for {self.func}.")
 
 
 @test
@@ -492,7 +496,9 @@ def test_a(fx_a, fx_b, a, b=10):
     assert 11 == b
     trace.append("test_a done")
 
-run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
+@test
+async def test_run_with_fixtures():
+    run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
 
 assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
@@ -546,14 +552,25 @@ class lifetime:
 
 # Async fixtures require quite a refactoring as everything becomes async, but we still want
 # to support sync code.
-#@test.fixture
-#async def my_async_fixture():
-#    await asyncio.sleep(0)
-#    yield 'async-42'
-#
+@test.fixture
+async def my_async_fixture():
+    await asyncio.sleep(0)
+    yield 'async-42'
+
+@test
+async def async_fixture_with_async_with():
+    async with test.my_async_fixture as f:
+        assert 'async-42' == f
+    try:
+        with test.my_async_fixture:
+            assert False
+    except Exception as e:
+        test.startswith(str(e), "Use 'async with' for ")
+
+
 #@test
-#async def async_fixtures(my_async_fixture):
-#    test.eq('async-42', my_async_fixture)
+async def async_fixture_as_arg(my_async_fixture):
+    test.eq('async-42', my_async_fixture)
 
 
 # define, test and install default fixture
