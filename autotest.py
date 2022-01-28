@@ -440,11 +440,16 @@ def frame_to_traceback(tb_frame, tb_next=None):
     return create_traceback(tb_frame.f_back, tb) if tb_frame.f_back else tb
 
 
+def get_fixtures_for(fixtures, func):
+    AUTOTEST_INTERNAL = 1
+    return [fixtures[name] for name in inspect.signature(func).parameters if name in fixtures]
+
+
 """ bootstrapping: test and instal fixture support """
 def get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
-    fixture_args_names = (name for name in inspect.signature(func).parameters if name in fixtures)
-    fixture_args_funcs = (fixtures[name] for name in fixture_args_names)
+    fixture_args_funcs = get_fixtures_for(fixtures, func)
+    assert all(inspect.isgeneratorfunction(f) for f in fixture_args_funcs), f"function '{func.__name__}' cannot have async fixtures."
     fixture_args_ctxmn = (contextlib.contextmanager(f) for f in fixture_args_funcs)
     fixture_fixtures   = (get_values_for_fixture_args(fixtures, fixture_ctxmn, context) for fixture_ctxmn in fixture_args_ctxmn)
     fixture_values = (context.enter_context(fixture_fixture) for fixture_fixture in fixture_fixtures)
@@ -458,8 +463,7 @@ def wrap_generator(f):
 
 async def async_get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
-    fixture_args_names = (name for name in inspect.signature(func).parameters if name in fixtures)
-    fixture_args_funcs = (fixtures[name] for name in fixture_args_names)
+    fixture_args_funcs = get_fixtures_for(fixtures, func)
     fixture_args_ctxmn = (
             contextlib.asynccontextmanager(
                 wrap_generator(f) if inspect.isgeneratorfunction(f)
@@ -492,7 +496,6 @@ def run_with_fixtures(fixtures, f, timeout,  *args, **kwds):
     AUTOTEST_INTERNAL = 1
     if inspect.iscoroutinefunction(f):
         return asyncio.run(async_run_with_fixtures(fixtures, f, timeout, *args, **kwds), debug=True)
-    assert not inspect.iscoroutinefunction(f)
     with contextlib.ExitStack() as context:
         return get_values_for_fixture_args(fixtures, f, context, *args, **kwds)
 
@@ -518,12 +521,10 @@ def test_a(fx_a, fx_b, a, b=10):
     assert 11 == b
     trace.append("test_a done")
 
-run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
-
-#@test
-#def test_run_with_fixtures():
-#    run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
-#    assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
+@test
+def test_run_with_fixtures():
+    run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
+    assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
 
 fixture_lifetime = []
@@ -575,25 +576,46 @@ class lifetime:
 
 # Async fixtures require quite a refactoring as everything becomes async, but we still want
 # to support sync code.
-@test.fixture
-async def my_async_fixture():
-    await asyncio.sleep(0)
-    yield 'async-42'
+class async_fixtures:
 
-@test
-async def async_fixture_with_async_with():
-    async with test.my_async_fixture as f:
-        assert 'async-42' == f
+    @test.fixture
+    async def my_async_fixture():
+        await asyncio.sleep(0)
+        yield 'async-42'
+
+
+    @test
+    async def async_fixture_with_async_with():
+        async with test.my_async_fixture as f:
+            assert 'async-42' == f
+        try:
+            with test.my_async_fixture:
+                assert False
+        except Exception as e:
+            test.startswith(str(e), "Use 'async with' for ")
+
+
+    @test
+    async def async_fixture_as_arg(my_async_fixture):
+        test.eq('async-42', my_async_fixture)
+
+
     try:
-        with test.my_async_fixture:
-            assert False
-    except Exception as e:
-        test.startswith(str(e), "Use 'async with' for ")
+        @test
+        def only_async_funcs_can_have_async_fixtures(my_async_fixture):
+            assert False, "not possible"
+    except AssertionError as e:
+        test.eq(f"function 'only_async_funcs_can_have_async_fixtures' cannot have async fixtures.", str(e))
 
 
-@test
-async def async_fixture_as_arg(my_async_fixture):
-    test.eq('async-42', my_async_fixture)
+    @test.fixture
+    async def with_nested_async_fixture(my_async_fixture):
+        yield f">>>{my_async_fixture}<<<"
+
+
+    @test
+    async def async_test_with_nested_async_fixtures(with_nested_async_fixture):
+        test.eq(">>>async-42<<<", with_nested_async_fixture)
 
 
 # define, test and install default fixture
