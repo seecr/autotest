@@ -450,23 +450,29 @@ def get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
     fixture_values = (context.enter_context(fixture_fixture) for fixture_fixture in fixture_fixtures)
     return func(*fixture_values, *args, **kwds)
 
+def wrap_generator(f):
+    async def wrap(*a, **k):
+        for v in f(*a, **k):
+            yield v
+    return wrap
 
 async def async_get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
     fixture_args_names = (name for name in inspect.signature(func).parameters if name in fixtures)
     fixture_args_funcs = (fixtures[name] for name in fixture_args_names)
     fixture_args_ctxmn = (
-            contextlib.asynccontextmanager(f) if inspect.isasyncgenfunction(f)
-                else contextlib.contextmanager(f)
+            contextlib.asynccontextmanager(
+                wrap_generator(f) if inspect.isgeneratorfunction(f)
+                else f)
             for f in fixture_args_funcs)
     fixture_fixtures   = (await async_get_values_for_fixture_args(fixtures, fixture_ctxmn, context) for fixture_ctxmn in fixture_args_ctxmn)
-    fixture_values = [context.enter_context(fixture_fixture) async for fixture_fixture in fixture_fixtures]
+    fixture_values = [(await context.enter_async_context(fixture_fixture)) async for fixture_fixture in fixture_fixtures]
     return func(*fixture_values, *args, **kwds)
 
 
 async def async_run_with_fixtures(fixtures, af, timeout, *args, **kwargs):
     AUTOTEST_INTERNAL = 1
-    with contextlib.ExitStack() as context:
+    async with contextlib.AsyncExitStack() as context:
         result = await async_get_values_for_fixture_args(fixtures, af, context, *args, **kwargs)
         assert inspect.iscoroutine(result)
         loop = asyncio.get_running_loop()
@@ -585,7 +591,7 @@ async def async_fixture_with_async_with():
         test.startswith(str(e), "Use 'async with' for ")
 
 
-#@test
+@test
 async def async_fixture_as_arg(my_async_fixture):
     test.eq('async-42', my_async_fixture)
 
