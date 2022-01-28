@@ -441,7 +441,6 @@ def frame_to_traceback(tb_frame, tb_next=None):
 
 
 """ bootstrapping: test and instal fixture support """
-# redefine the placeholder
 def get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
     fixture_args_names = (name for name in inspect.signature(func).parameters if name in fixtures)
@@ -452,29 +451,44 @@ def get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
     return func(*fixture_values, *args, **kwds)
 
 
+async def async_get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
+    AUTOTEST_INTERNAL = 1
+    fixture_args_names = (name for name in inspect.signature(func).parameters if name in fixtures)
+    fixture_args_funcs = (fixtures[name] for name in fixture_args_names)
+    fixture_args_ctxmn = (
+            contextlib.asynccontextmanager(f) if inspect.isasyncgenfunction(f)
+                else contextlib.contextmanager(f)
+            for f in fixture_args_funcs)
+    fixture_fixtures   = (await async_get_values_for_fixture_args(fixtures, fixture_ctxmn, context) for fixture_ctxmn in fixture_args_ctxmn)
+    fixture_values = [context.enter_context(fixture_fixture) async for fixture_fixture in fixture_fixtures]
+    return func(*fixture_values, *args, **kwds)
+
+
+async def async_run_with_fixtures(fixtures, af, timeout, *args, **kwargs):
+    AUTOTEST_INTERNAL = 1
+    with contextlib.ExitStack() as context:
+        result = await async_get_values_for_fixture_args(fixtures, af, context, *args, **kwargs)
+        assert inspect.iscoroutine(result)
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(asyncio_filtering_exception_handler)
+        done, pending = await asyncio.wait([result], timeout=timeout)
+        for d in done:
+            await d
+        if pending:
+            n = len(pending)
+            p = pending.pop() # one problem at a time
+            s = p.get_stack() # "only one stack frame is returned for a suspended coroutine"
+            tb1 = frame_to_traceback(s[-1])
+            raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
+
 # redefine the placeholder
 def run_with_fixtures(fixtures, f, timeout,  *args, **kwds):
     AUTOTEST_INTERNAL = 1
+    if inspect.iscoroutinefunction(f):
+        return asyncio.run(async_run_with_fixtures(fixtures, f, timeout, *args, **kwds), debug=True)
+    assert not inspect.iscoroutinefunction(f)
     with contextlib.ExitStack() as context:
-        result = get_values_for_fixture_args(fixtures, f, context, *args, **kwds)
-        # if we move the check below to get_values_for_fixture_args, we would have async fixtures; not sure what that would bring tho.
-        # TODO make fixtures also async (yes, can be handy)
-        if inspect.iscoroutine(result):
-            async def with_timeout():
-                loop = asyncio.get_running_loop()
-                loop.set_exception_handler(asyncio_filtering_exception_handler)
-                AUTOTEST_INTERNAL = 1
-                done, pending = await asyncio.wait([result], timeout=timeout)
-                for d in done:
-                    await d
-                if pending:
-                    n = len(pending)
-                    p = pending.pop() # one problem at a time
-                    s = p.get_stack() # "only one stack frame is returned for a suspended coroutine"
-                    tb1 = frame_to_traceback(s[-1])
-                    raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
-            return asyncio.run(with_timeout(), debug=True)
-        return result
+        return get_values_for_fixture_args(fixtures, f, context, *args, **kwds)
 
 
 @test.fixture
@@ -500,7 +514,10 @@ def test_a(fx_a, fx_b, a, b=10):
 
 run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
 
-assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
+#@test
+#def test_run_with_fixtures():
+#    run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
+#    assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
 
 fixture_lifetime = []
