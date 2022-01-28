@@ -421,16 +421,6 @@ def extra_args_supplying_contextmanager():
         assert ('a', 'b', 'c', 'd', 'e', 'f') == v, v
 
 
-""" bootstrapping: test and instal fixture support """
-# redefine the placeholder
-def get_fixtures(fixtures, func, context, *args, **kwds):
-    AUTOTEST_INTERNAL = 1
-    return func(*(context.enter_context(
-                    get_fixtures(fixtures, contextlib.contextmanager(fixtures[name]), context))
-                  for name in inspect.signature(func).parameters if name in fixtures),
-                *args, **kwds)
-
-
 # using import.import_module in asyncio somehow gives us the frozen tracebacks (which were
 # removed in 2012, but yet showing up again in this case. Let's get rid of them.
 def asyncio_filtering_exception_handler(loop, context):
@@ -450,12 +440,24 @@ def frame_to_traceback(tb_frame, tb_next=None):
     return create_traceback(tb_frame.f_back, tb) if tb_frame.f_back else tb
 
 
+""" bootstrapping: test and instal fixture support """
+# redefine the placeholder
+def get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
+    AUTOTEST_INTERNAL = 1
+    fixture_args_names = (name for name in inspect.signature(func).parameters if name in fixtures)
+    fixture_args_funcs = (fixtures[name] for name in fixture_args_names)
+    fixture_args_ctxmn = (contextlib.contextmanager(f) for f in fixture_args_funcs)
+    fixture_fixtures   = (get_values_for_fixture_args(fixtures, fixture_ctxmn, context) for fixture_ctxmn in fixture_args_ctxmn)
+    fixture_values = (context.enter_context(fixture_fixture) for fixture_fixture in fixture_fixtures)
+    return func(*fixture_values, *args, **kwds)
+
+
 # redefine the placeholder
 def run_with_fixtures(fixtures, f, timeout,  *args, **kwds):
     AUTOTEST_INTERNAL = 1
     with contextlib.ExitStack() as context:
-        result = get_fixtures(fixtures, f, context, *args, **kwds)
-        # if we move the check below to get_fixtures, we would have async fixtures; not sure what that would bring tho.
+        result = get_values_for_fixture_args(fixtures, f, context, *args, **kwds)
+        # if we move the check below to get_values_for_fixture_args, we would have async fixtures; not sure what that would bring tho.
         # TODO make fixtures also async (yes, can be handy)
         if inspect.iscoroutine(result):
             async def with_timeout():
@@ -496,9 +498,7 @@ def test_a(fx_a, fx_b, a, b=10):
     assert 11 == b
     trace.append("test_a done")
 
-@test
-async def test_run_with_fixtures():
-    run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
+run_with_fixtures(test.fixtures, test_a, 1, 9, b=11)
 
 assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
