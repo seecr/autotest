@@ -440,44 +440,52 @@ def frame_to_traceback(tb_frame, tb_next=None):
     return create_traceback(tb_frame.f_back, tb) if tb_frame.f_back else tb
 
 
+""" bootstrapping: test and instal fixture support """
+
+
 def get_fixtures_for(fixtures, func):
     AUTOTEST_INTERNAL = 1
     return [fixtures[name] for name in inspect.signature(func).parameters if name in fixtures]
 
 
-""" bootstrapping: test and instal fixture support """
-def get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
+def ensure_async_generator_func(f):
+    if inspect.isasyncgenfunction(f):
+        return f
+    if inspect.isgeneratorfunction(f):
+        @functools.wraps(f)
+        async def wrap(*a, **k):
+            for v in f(*a, **k):
+                yield v
+        return wrap
+    assert False, f"{f} cannot be a async generator."
+
+
+def run_recursively(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
-    fixture_args_funcs = get_fixtures_for(fixtures, func)
-    assert all(inspect.isgeneratorfunction(f) for f in fixture_args_funcs), f"function '{func.__name__}' cannot have async fixtures."
-    fixture_args_ctxmn = (contextlib.contextmanager(f) for f in fixture_args_funcs)
-    fixture_fixtures   = (get_values_for_fixture_args(fixtures, fixture_ctxmn, context) for fixture_ctxmn in fixture_args_ctxmn)
-    fixture_values = (context.enter_context(fixture_fixture) for fixture_fixture in fixture_fixtures)
+    fixture_values = []
+    for fx in get_fixtures_for(fixtures, func):
+        assert inspect.isgeneratorfunction(fx), f"function '{func.__name__}' cannot have async fixture '{fx.__name__}'."
+        ctxmgr_func = contextlib.contextmanager(fx)
+        context_mgr = run_recursively(fixtures, ctxmgr_func, context)
+        fixture_values.append(context.enter_context(context_mgr))
     return func(*fixture_values, *args, **kwds)
 
-def wrap_generator(f):
-    async def wrap(*a, **k):
-        for v in f(*a, **k):
-            yield v
-    return wrap
+# compare ^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v
 
-async def async_get_values_for_fixture_args(fixtures, func, context, *args, **kwds):
+async def async_run_recursively(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
-    fixture_args_funcs = get_fixtures_for(fixtures, func)
-    fixture_args_ctxmn = (
-            contextlib.asynccontextmanager(
-                wrap_generator(f) if inspect.isgeneratorfunction(f)
-                else f)
-            for f in fixture_args_funcs)
-    fixture_fixtures   = (await async_get_values_for_fixture_args(fixtures, fixture_ctxmn, context) for fixture_ctxmn in fixture_args_ctxmn)
-    fixture_values = [(await context.enter_async_context(fixture_fixture)) async for fixture_fixture in fixture_fixtures]
+    fixture_values = []
+    for fx in get_fixtures_for(fixtures, func):
+        ctxmgr_func = contextlib.asynccontextmanager(ensure_async_generator_func(fx))
+        context_mgr = await async_run_recursively(fixtures, ctxmgr_func, context)
+        fixture_values.append(await context.enter_async_context(context_mgr))
     return func(*fixture_values, *args, **kwds)
 
 
 async def async_run_with_fixtures(fixtures, af, timeout, *args, **kwargs):
     AUTOTEST_INTERNAL = 1
     async with contextlib.AsyncExitStack() as context:
-        result = await async_get_values_for_fixture_args(fixtures, af, context, *args, **kwargs)
+        result = await async_run_recursively(fixtures, af, context, *args, **kwargs)
         assert inspect.iscoroutine(result)
         loop = asyncio.get_running_loop()
         loop.set_exception_handler(asyncio_filtering_exception_handler)
@@ -491,13 +499,14 @@ async def async_run_with_fixtures(fixtures, af, timeout, *args, **kwargs):
             tb1 = frame_to_traceback(s[-1])
             raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
 
+
 # redefine the placeholder
-def run_with_fixtures(fixtures, f, timeout,  *args, **kwds):
+def run_with_fixtures(fixtures, test_func, timeout, *args, **kwds):
     AUTOTEST_INTERNAL = 1
-    if inspect.iscoroutinefunction(f):
-        return asyncio.run(async_run_with_fixtures(fixtures, f, timeout, *args, **kwds), debug=True)
+    if inspect.iscoroutinefunction(test_func):
+        return asyncio.run(async_run_with_fixtures(fixtures, test_func, timeout, *args, **kwds), debug=True)
     with contextlib.ExitStack() as context:
-        return get_values_for_fixture_args(fixtures, f, context, *args, **kwds)
+        return run_recursively(fixtures, test_func, context, *args, **kwds)
 
 
 @test.fixture
@@ -605,7 +614,7 @@ class async_fixtures:
         def only_async_funcs_can_have_async_fixtures(my_async_fixture):
             assert False, "not possible"
     except AssertionError as e:
-        test.eq(f"function 'only_async_funcs_can_have_async_fixtures' cannot have async fixtures.", str(e))
+        test.eq(f"function 'only_async_funcs_can_have_async_fixtures' cannot have async fixture 'my_async_fixture'.", str(e))
 
 
     @test.fixture
@@ -616,6 +625,12 @@ class async_fixtures:
     @test
     async def async_test_with_nested_async_fixtures(with_nested_async_fixture):
         test.eq(">>>async-42<<<", with_nested_async_fixture)
+
+
+    @test
+    async def mix_async_and_sync_fixtures(fixture_C, with_nested_async_fixture):
+        test.eq(">>>async-42<<<", with_nested_async_fixture)
+        test.eq(252, fixture_C)
 
 
 # define, test and install default fixture
