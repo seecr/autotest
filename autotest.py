@@ -146,8 +146,7 @@ class BoundTest:
         if self._report:
             self._reporter.reported += 1
         try:
-            return Run(self._fixtures, self._f, self._timeout).run_with_fixtures(*app_args, **app_kwds)
-            return run_with_fixtures(self._fixtures, self._f, self._timeout, *app_args, **app_kwds)
+            return Run(self._fixtures, self._f, self._timeout)(*app_args, **app_kwds)
         except SystemExit:
             raise
         except BaseException:
@@ -174,34 +173,38 @@ class BoundTest:
 
 
 
-class Test:
-    def __init__(self, fixtures, reporter, **opts):
-        self._fixtures = fixtures.copy()
-        self._opts = opts
+class TestContext:
+    """ Defines the context a test runs in: fixtures, reporting, options. """
+
+    def __init__(self, reporter, fixtures=None, **opts):
+        self.fixtures = {} if fixtures is None else fixtures.copy()
         self._reporter = reporter
+        self.opts = opts
 
-    def __call__(self, f):
+    def __call__(self, test_func):
         AUTOTEST_INTERNAL = 1
-        return self._bind(f, **self._opts)
+        return self._bind_and_run(test_func, **self.opts)
 
-    def _bind(self, f, *, skip, keep, gather, **opts):
+    def _bind_and_run(self, test_func, *, skip, keep, gather, **opts):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
-        bound_f = BoundTest(f, self._fixtures, self._reporter, **opts)
-        if inspect.isfunction(skip) and not skip(f) or not skip:
-            bound_f()
+        bound_test_func = BoundTest(test_func, self.fixtures, self._reporter, **opts)
+        if inspect.isfunction(skip) and not skip(test_func) or not skip:
+            bound_test_func()
         if gather:
-            self._reporter.gathered.append(bound_f)
-        return bound_f if keep else None
+            self._reporter.gathered.append(bound_test_func)
+        return bound_test_func if keep else None
+
+    def clone(self, **opts):
+        return TestContext(self._reporter, fixtures=self.fixtures, **{**self.opts, **opts})
 
 
 
 class Runner:
 
     def __init__(self, **opts):
-        self._defaults = [{**sys_defaults, **opts}]
-        self.fixtures = {}
         self.reset()
+        self.testcontext = [TestContext(reporter=self, **{**sys_defaults, **opts})]
 
 
     def reset(self):
@@ -217,9 +220,9 @@ class Runner:
         try:
             if opts:
                 # @test(**opts)
-                return Test(self.fixtures, self, **{**self.defaults, **opts})
+                return self.testcontext[-1].clone(**opts)
             # @test
-            return Test(self.fixtures, self, **self.defaults)(f)
+            return self.testcontext[-1](f)
         finally:
             self.found += 1
 
@@ -227,16 +230,17 @@ class Runner:
     @contextlib.contextmanager
     def default(self, **kws):
         """ Set default options for next tests."""
-        self._defaults.append({**self.defaults, **kws})
+        self.testcontext.append(self.testcontext[-1].clone(**kws))
         try:
             with self: # also create new gathering context
                 yield self
         finally:
-            self._defaults.pop()
+            self.testcontext.pop()
+
 
     @property
-    def defaults(self):
-        return self._defaults[-1]
+    def context(self):
+        return self.testcontext[-1]
 
     @property
     def gathered(self):
@@ -251,7 +255,7 @@ class Runner:
 
 
     def fail(self, *args, **kwds):
-        if not self.defaults.get('skip', False):
+        if not self.testcontext[-1].opts.get('skip', False):
             args += (kwds,) if kwds else ()
             raise AssertionError(*args)
 
@@ -261,7 +265,7 @@ class Runner:
            That value is used as argument to functions declaring the fixture in their args. """
         assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
         bound_f = bind_1_frame_back(func)
-        self.fixtures[func.__name__] = bound_f
+        self.testcontext[-1].fixtures[func.__name__] = bound_f
         return bound_f
 
 
@@ -304,10 +308,9 @@ class Runner:
     def __getattr__(self, name):
         """ run.eq(lhs, rhs) etc, any operator from module 'operator' really.
             or it returns a context manager if name denotes a fixture. """
-        if name in self.fixtures:
-            fx = self.fixtures[name]
-            fx_bound = Run(self.fixtures, fx, timeout=1).run_with_fixtures
-            #fx_bound = functools.partial(run_with_fixtures, self.fixtures, fx, 1) # TODO fixed timeout
+        if name in self.testcontext[-1].fixtures:
+            fx = self.testcontext[-1].fixtures[name]
+            fx_bound = Run(self.testcontext[-1].fixtures, fx, timeout=1).__call__
             if inspect.isgeneratorfunction(fx):
                 return CollectArgsContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
@@ -332,11 +335,11 @@ def filter_traceback(tb):
     pass
 
 
+""" Bootstrapping, placeholder, overwritten later """
 class Run:
-    def __init__(self, _, f, timeout, **__):
+    def __init__(self, _, f, *a, **k):
         self._f = f
-    def run_with_fixtures(self, *a, **k):
-        """ Bootstrapping, placeholder, overwritten later """
+    def __call__(self, *a, **k):
         return self._f(*a, **k)
 
 
@@ -479,7 +482,9 @@ def ensure_async_generator_func(f):
     assert False, f"{f} cannot be a async generator."
 
 
+# redefine the placeholder with support for fixtures
 class Run:
+    """ Activates all fixtures recursively, then runs the test function. """
 
     def __init__(self, fixtures, func, timeout):
         self._fixtures = fixtures
@@ -533,12 +538,12 @@ class Run:
                 raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
 
 
-    # redefine the placeholder
-    def run_with_fixtures(self, *args, **kwds):
+    def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         if inspect.iscoroutinefunction(self._func):
             return asyncio.run(self.async_run_with_fixtures(*args, **kwds), debug=True)
         with contextlib.ExitStack() as context:
+            # we could use the timeout here too, with a signal handler TODO
             return self.run_recursively(self._func, context, *args, **kwds)
 
 
@@ -565,7 +570,7 @@ def test_a(fx_a, fx_b, a, b=10):
 
 @test
 def test_run_with_fixtures():
-    Run(test.fixtures, test_a, 1).run_with_fixtures(9, b=11)
+    Run(test.testcontext[-1].fixtures, test_a, 1)(9, b=11)
     assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
 
@@ -772,11 +777,11 @@ def test_testop_has_args():
 with test.default(report=False):
     @test
     def nested_defaults():
-        dflts0 = test.defaults
+        dflts0 = test.context.opts
         assert not dflts0['skip']
         assert not dflts0['report']
         with test.default(skip=True, report=True):
-            dflts1 = test.defaults
+            dflts1 = test.context.opts
             assert dflts1['skip']
             assert dflts1['report']
             @test
@@ -784,17 +789,17 @@ with test.default(report=False):
                 test.eq(1, 2)
             try:
                 with test.default(skip=False, report=False) as TeSt:
-                    dflts2 = TeSt.defaults
+                    dflts2 = TeSt.context.opts
                     assert not dflts2['skip']
                     assert not dflts2['report']
                     @TeSt
                     def fails_but_is_not_reported():
                         TeSt.gt(1, 2)
                     test.fail()
-                assert test.defaults == dflts1
+                assert test.context.opts == dflts1
             except AssertionError as e:
                 test.eq("('gt', 1, 2)", str(e))
-        assert test.defaults == dflts0
+        assert test.context.opts == dflts0
 
 @test
 def gather_tests():
