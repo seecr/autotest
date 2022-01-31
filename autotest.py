@@ -129,48 +129,27 @@ sys_defaults = {
 
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
-
-class Test:
-    def __init__(self, fixtures, f, reporter, **opts):
-        self._fixtures = fixtures
-        self._opts = opts
+class BoundTest:
+    def __init__(self, f, fixtures, reporter, timeout, report):
         self._f = f
+        self._fixtures = fixtures
         self._reporter = reporter
-
-    def __call__(self, f):
-        return self._bind(self._fixtures, f, **self._opts)
-
-    def run(self):
-        AUTOTEST_INTERNAL = 1
-        return self._bind(self._fixtures, self._f, **self._opts)
-
-    def _bind(self, fixtures, f, *, bind, skip, keep, gather, **opts):
-        """ Binds f to stack vars and fixtures and runs it immediately. """
-        AUTOTEST_INTERNAL = 1
-        stack_bound_f = bind_1_frame_back(f)
-        fixtures_bound_f = functools.partial(self._run, stack_bound_f, fixtures.copy(), **opts)
-        if inspect.isfunction(skip) and not skip(f) or not skip:
-            fixtures_bound_f()
-        result_f = fixtures_bound_f if bind else functools.partial(self._run, stack_bound_f, (), **opts)
-        if gather:
-            self._reporter.gathered.append(result_f)
-        return result_f if keep else None
-
-
-    def _run(self, f, fixtures, *app_args, timeout, report, **app_kwds):
+        self._timeout = timeout
+        self._report = report
+    def __call__(self, *app_args, **app_kwds):
         AUTOTEST_INTERNAL = 1
         """ Runs f with given fixtues and application args, reporting when necessary. """
-        print_msg = print if report else lambda *_, **__: None
-        print_msg(f"{f.__module__}  {f.__name__}  ", flush=True)
-        if report:
+        print_msg = print if self._report else lambda *_, **__: None
+        print_msg(f"{self._f.__module__}  {self._f.__name__}  ", flush=True)
+        if self._report:
             self._reporter.reported += 1
         try:
-            return run_with_fixtures(fixtures, f, timeout, *app_args, **app_kwds)
+            return run_with_fixtures(self._fixtures, self._f, self._timeout, *app_args, **app_kwds)
         except SystemExit:
             raise
         except BaseException:
             et, ev, tb = sys.exc_info()
-            recursive = self._run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
+            recursive = self.__call__.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
             new_tb = filter_traceback(tb)
             if new_tb is not None: # avoid our own tests to have no traceback left
                 tb = new_tb
@@ -183,12 +162,39 @@ class Test:
             else:
                 # TODO put this in sys.excepthook, to avoid printing it twice
                 #      might be a bit complicated 
-                if report:
+                if self._report:
                     post_mortem(tb, 'longlist', 'exit')
                 # NB: this could be raised in a wrapping test, or be the last one
                 raise ev.with_traceback(tb)
         finally:
             self._reporter.ran += 1
+
+
+
+class Test:
+    def __init__(self, fixtures, reporter, **opts):
+        self._fixtures = fixtures.copy()
+        self._opts = opts
+        self._reporter = reporter
+
+    def __call__(self, f):
+        AUTOTEST_INTERNAL = 1
+        return self._bind(f, **self._opts)
+
+    def _bind(self, f, *, bind, skip, keep, gather, **opts):
+        """ Binds f to stack vars and fixtures and runs it immediately. """
+        AUTOTEST_INTERNAL = 1
+        stack_bound_f = bind_1_frame_back(f)
+
+        fixtures_bound_f = BoundTest(stack_bound_f, self._fixtures, self._reporter, **opts)
+        if inspect.isfunction(skip) and not skip(f) or not skip:
+            fixtures_bound_f()
+
+        result_f = fixtures_bound_f if bind else BoundTest(stack_bound_f, (), self._reporter, **opts)
+        if gather:
+            self._reporter.gathered.append(result_f)
+        return result_f if keep else None
+
 
 
 
@@ -213,12 +219,10 @@ class Runner:
         """Decorator to define, run and report a test, with one-time options when given. """
         try:
             if opts:
-                t = Test(self.fixtures, None, self, **{**self.defaults, **opts})
-                return t
-                return functools.partial(self._bind, self.fixtures, **{**self.defaults, **opts})
-            t = Test(self.fixtures, f, self, **self.defaults)
-            return t.run()
-            return self._bind(self.fixtures, f, **self.defaults)
+                # @test(**opts)
+                return Test(self.fixtures, self, **{**self.defaults, **opts})
+            # @test
+            return Test(self.fixtures, self, **self.defaults)(f)
         finally:
             self.found += 1
 
