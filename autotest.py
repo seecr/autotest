@@ -122,7 +122,6 @@ sys_defaults = {
     'skip'    : not is_main_process or __name__ == '__mp_main__',
     'keep'    : False,      # Ditch test functions after running, or keep them in their namespace.
     'report'  : True,       # Do reporting when starting a test.
-    'bind'    : False,      # Kept functions are bound to fixtures
     'gather'  : False,      # Gather tests, use gathered() to get them
     'timeout' : 2,          # asyncio task timeout
 }
@@ -130,12 +129,15 @@ sys_defaults = {
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
 class BoundTest:
+
     def __init__(self, f, fixtures, reporter, timeout, report):
-        self._f = f
+        AUTOTEST_INTERNAL = 1
+        self._f = bind_1_frame_back(f)
         self._fixtures = fixtures
         self._reporter = reporter
         self._timeout = timeout
         self._report = report
+
     def __call__(self, *app_args, **app_kwds):
         AUTOTEST_INTERNAL = 1
         """ Runs f with given fixtues and application args, reporting when necessary. """
@@ -181,21 +183,15 @@ class Test:
         AUTOTEST_INTERNAL = 1
         return self._bind(f, **self._opts)
 
-    def _bind(self, f, *, bind, skip, keep, gather, **opts):
+    def _bind(self, f, *, skip, keep, gather, **opts):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
-        stack_bound_f = bind_1_frame_back(f)
-
-        fixtures_bound_f = BoundTest(stack_bound_f, self._fixtures, self._reporter, **opts)
+        bound_f = BoundTest(f, self._fixtures, self._reporter, **opts)
         if inspect.isfunction(skip) and not skip(f) or not skip:
-            fixtures_bound_f()
-
-        result_f = fixtures_bound_f if bind else BoundTest(stack_bound_f, (), self._reporter, **opts)
+            bound_f()
         if gather:
-            self._reporter.gathered.append(result_f)
-        return result_f if keep else None
-
-
+            self._reporter.gathered.append(bound_f)
+        return bound_f if keep else None
 
 
 
@@ -466,9 +462,11 @@ def frame_to_traceback(tb_frame, tb_next=None):
 """ bootstrapping: test and instal fixture support """
 
 
-def get_fixtures_for(fixtures, func):
+def get_fixtures_for(fixtures, func, except_for):
     AUTOTEST_INTERNAL = 1
-    return [fixtures[name] for name in inspect.signature(func).parameters if name in fixtures]
+    eturn = [fixtures[name] for name in inspect.signature(func).parameters
+            if name in fixtures and name not in except_for]
+    return eturn
 
 
 def ensure_async_generator_func(f):
@@ -486,10 +484,10 @@ def ensure_async_generator_func(f):
 def run_recursively(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
     fixture_values = []
-    for fx in get_fixtures_for(fixtures, func):
+    for fx in get_fixtures_for(fixtures, func, kwds.keys()):
         assert inspect.isgeneratorfunction(fx), f"function '{func.__name__}' cannot have async fixture '{fx.__name__}'."
         ctxmgr_func = contextlib.contextmanager(fx)
-        context_mgr = run_recursively(fixtures, ctxmgr_func, context)
+        context_mgr = run_recursively(fixtures, ctxmgr_func, context) # args not sinful
         fixture_values.append(context.enter_context(context_mgr))
     return func(*fixture_values, *args, **kwds)
 
@@ -498,9 +496,9 @@ def run_recursively(fixtures, func, context, *args, **kwds):
 async def async_run_recursively(fixtures, func, context, *args, **kwds):
     AUTOTEST_INTERNAL = 1
     fixture_values = []
-    for fx in get_fixtures_for(fixtures, func):
+    for fx in get_fixtures_for(fixtures, func, kwds.keys()):
         ctxmgr_func = contextlib.asynccontextmanager(ensure_async_generator_func(fx))
-        context_mgr = await async_run_recursively(fixtures, ctxmgr_func, context)
+        context_mgr = await async_run_recursively(fixtures, ctxmgr_func, context) # args not sinful
         fixture_values.append(await context.enter_async_context(context_mgr))
     return func(*fixture_values, *args, **kwds)
 
@@ -794,7 +792,7 @@ def gather_tests():
         def a_fixture():
             yield 16
 
-        @test(bind=False, skip=True)
+        @test(skip=True)
         def t0(a_fixture): return f'this is t0, with {a_fixture}'
 
         with test:
@@ -807,7 +805,7 @@ def gather_tests():
             def sub1(): return 56
             subsuite1 = test.gathered
 
-        @test(bind=True)
+        @test
         def t1(a_fixture): return f'this is t1, with {a_fixture}'
 
         @test(gather=False)
@@ -820,7 +818,7 @@ def gather_tests():
     test.eq(1, len(subsuite1))
     test.eq(56, subsuite1[0]())
     test.eq(2, len(suite))
-    test.eq('this is t0, with 42', suite[0](42))
+    test.eq('this is t0, with 42', suite[0](a_fixture=42))
     test.eq('this is t1, with 16', suite[1]())
 
 
@@ -843,7 +841,7 @@ def test_calls_other_test_with_fixture():
         return True
     @test(report=False)
     def test_b():
-        assert test_a(42)
+        assert test_a(fixture_A=42)
 
 
 @test
@@ -851,10 +849,11 @@ def test_calls_other_test_with_fixture_and_more_args():
     @test(keep=True, report=False, skip=True)
     def test_a(fixture_A, value):
         assert 42 == fixture_A
+        assert 16 == value
         return True
     @test(report=False)
     def test_b(fixture_A):
-        assert test_a(fixture_A, 42)
+        assert test_a(fixture_A=42, value=16)
 
 
 def capture(name):
@@ -1090,8 +1089,8 @@ class X:
             assert callable(D)
             assert C != D
             assert 10 == abs(-10) # built-in
-            assert 42 == C(42)
-            assert 84 == D(42, 84) # "fixtures"
+            assert 42 == C(fixture_A=42)
+            assert 84 == D(fixture_A=42, fixture_B=84) # "fixtures"
             assert 'module scope' == M
             assert 252 == fixture_C, fixture_C
 
@@ -1223,17 +1222,18 @@ def bind_test_functions_to_their_fixtures():
     def my_fix():
         yield 34
 
-    @test(bind=False, skip=True, keep=True, report=True)
-    def not_bound_but_with_reporting(my_fix):
+    @test(skip=True, keep=True, report=True)
+    def override_fixture_binding_with_kwarg(my_fix):
+        assert 34 != my_fix
         assert 56 == my_fix
         return my_fix
 
     with test.stdout as s:
-        not_bound_but_with_reporting(56)
-    assert "  not_bound_but_with_reporting  \n" in s.getvalue(), repr(s.getvalue())
+        override_fixture_binding_with_kwarg(my_fix=56) # fixture binding overridden
+    assert "  override_fixture_binding_with_kwarg  \n" in s.getvalue(), repr(s.getvalue())
 
 
-    @test(keep=True, bind=True)
+    @test(keep=True)
     def bound_fixture_1(my_fix):
         assert 34 == my_fix
         return my_fix
@@ -1244,7 +1244,7 @@ def bind_test_functions_to_their_fixtures():
     def my_fix(): # redefine fixture purposely to test time of binding
         yield 78
 
-    @test(keep=True, bind=True, skip=True) # skip, need more args
+    @test(keep=True, skip=True) # skip, need more args
     def bound_fixture_2(my_fix, result, *, extra=None):
         assert 78 == my_fix
         return result, extra
@@ -1255,14 +1255,14 @@ def bind_test_functions_to_their_fixtures():
     class A:
         a = 34
 
-        @test(keep=True, bind=True) # skip, need more args
+        @test(keep=True) # skip, need more args
         def bound_fixture_acces_class_locals(my_fix):
             assert 78 == my_fix
             assert 34 == a
             return a
         assert 34 == bound_fixture_acces_class_locals()
 
-    with test.default(bind=True, keep=True):
+    with test.default(keep=True):
 
         @test
         def bound_by_default(my_fix):
@@ -1279,7 +1279,7 @@ def bind_test_functions_to_their_fixtures():
         yield 1
         trace.append('E')
 
-    @test(keep=True, skip=True, bind=True)
+    @test(keep=True, skip=True)
     def rebind_on_every_call(enumerate):
         return True
 
