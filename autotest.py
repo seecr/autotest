@@ -130,6 +130,69 @@ sys_defaults = {
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
 
+class Test:
+    def __init__(self, fixtures, f, reporter, **opts):
+        self._fixtures = fixtures
+        self._opts = opts
+        self._f = f
+        self._reporter = reporter
+
+    def __call__(self, f):
+        return self._bind(self._fixtures, f, **self._opts)
+
+    def run(self):
+        AUTOTEST_INTERNAL = 1
+        return self._bind(self._fixtures, self._f, **self._opts)
+
+    def _bind(self, fixtures, f, *, bind, skip, keep, gather, **opts):
+        """ Binds f to stack vars and fixtures and runs it immediately. """
+        AUTOTEST_INTERNAL = 1
+        stack_bound_f = bind_1_frame_back(f)
+        fixtures_bound_f = functools.partial(self._run, stack_bound_f, fixtures.copy(), **opts)
+        if inspect.isfunction(skip) and not skip(f) or not skip:
+            fixtures_bound_f()
+        result_f = fixtures_bound_f if bind else functools.partial(self._run, stack_bound_f, (), **opts)
+        if gather:
+            self._reporter.gathered.append(result_f)
+        return result_f if keep else None
+
+
+    def _run(self, f, fixtures, *app_args, timeout, report, **app_kwds):
+        AUTOTEST_INTERNAL = 1
+        """ Runs f with given fixtues and application args, reporting when necessary. """
+        print_msg = print if report else lambda *_, **__: None
+        print_msg(f"{f.__module__}  {f.__name__}  ", flush=True)
+        if report:
+            self._reporter.reported += 1
+        try:
+            return run_with_fixtures(fixtures, f, timeout, *app_args, **app_kwds)
+        except SystemExit:
+            raise
+        except BaseException:
+            et, ev, tb = sys.exc_info()
+            recursive = self._run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
+            new_tb = filter_traceback(tb)
+            if new_tb is not None: # avoid our own tests to have no traceback left
+                tb = new_tb
+            if ev.args == ():
+                if recursive: # unwind stack to finalize all fixtures before post_portem
+                    raise
+                traceback.print_exception(et, ev, tb)
+                post_mortem(tb, 'longlist')
+                exit(-1)
+            else:
+                # TODO put this in sys.excepthook, to avoid printing it twice
+                #      might be a bit complicated 
+                if report:
+                    post_mortem(tb, 'longlist', 'exit')
+                # NB: this could be raised in a wrapping test, or be the last one
+                raise ev.with_traceback(tb)
+        finally:
+            self._reporter.ran += 1
+
+
+
+
 class Runner:
 
     def __init__(self, **opts):
@@ -150,7 +213,11 @@ class Runner:
         """Decorator to define, run and report a test, with one-time options when given. """
         try:
             if opts:
+                t = Test(self.fixtures, None, self, **{**self.defaults, **opts})
+                return t
                 return functools.partial(self._bind, self.fixtures, **{**self.defaults, **opts})
+            t = Test(self.fixtures, f, self, **self.defaults)
+            return t.run()
             return self._bind(self.fixtures, f, **self.defaults)
         finally:
             self.found += 1
@@ -239,60 +306,12 @@ class Runner:
         if name in self.fixtures:
             fx = self.fixtures[name]
             fx_bound = functools.partial(run_with_fixtures, self.fixtures, fx, 1) # TODO fixed timeout
-            print("FIXTURE:", name)
             if inspect.isgeneratorfunction(fx):
                 return CollectArgsContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
                 return CollectArgsAsyncContextManager(fx_bound)
             raise ValueError(f"not an (async) generator: {fx}")
         return getattr(self.Operator(), name)
-
-
-    def _bind(self, fixtures, f, *, bind, skip, keep, gather, **opts):
-        """ Binds f to stack vars and fixtures and runs it immediately. """
-        AUTOTEST_INTERNAL = 1
-        stack_bound_f = bind_1_frame_back(f)
-        fixtures_bound_f = functools.partial(self._run, stack_bound_f, fixtures.copy(), **opts)
-        if inspect.isfunction(skip) and not skip(f) or not skip:
-            fixtures_bound_f()
-        result_f = fixtures_bound_f if bind else functools.partial(self._run, stack_bound_f, (), **opts)
-        if gather:
-            self.gathered.append(result_f)
-        return result_f if keep else None
-
-
-    def _run(self, f, fixtures, *app_args, timeout, report, **app_kwds):
-        AUTOTEST_INTERNAL = 1
-        """ Runs f with given fixtues and application args, reporting when necessary. """
-        print_msg = print if report else lambda *_, **__: None
-        print_msg(f"{f.__module__}  {f.__name__}  ", flush=True)
-        if report:
-            self.reported += 1
-        try:
-            return run_with_fixtures(fixtures, f, timeout, *app_args, **app_kwds)
-        except SystemExit:
-            raise
-        except BaseException:
-            et, ev, tb = sys.exc_info()
-            recursive = self._run.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
-            new_tb = filter_traceback(tb)
-            if new_tb is not None: # avoid our own tests to have no traceback left
-                tb = new_tb
-            if ev.args == ():
-                if recursive: # unwind stack to finalize all fixtures before post_portem
-                    raise
-                traceback.print_exception(et, ev, tb)
-                post_mortem(tb, 'longlist')
-                exit(-1)
-            else:
-                # TODO put this in sys.excepthook, to avoid printing it twice
-                #      might be a bit complicated 
-                if report:
-                    post_mortem(tb, 'longlist', 'exit')
-                # NB: this could be raised in a wrapping test, or be the last one
-                raise ev.with_traceback(tb)
-        finally:
-            self.ran += 1
 
 
 test = Runner() # default Runner
