@@ -30,6 +30,21 @@
 # 4. old behaviour (skip dependencies) via argument??
 
 
+import pdb
+
+def post_mortem(tb, *cmds):
+    p = pdb.Pdb()
+    p.rcLines.extend(cmds)
+    p.reset()
+    p.interaction(None, tb)
+
+def insert_excepthook(new_hook):
+    prev_excepthook = sys.excepthook
+    def hook(*args):
+        prev_excepthook(*new_hook(*args))
+    sys.excepthook = hook
+
+
 if __name__ == '__main__':
 
     # experimental main; not tested
@@ -46,8 +61,15 @@ if __name__ == '__main__':
       $ autotest.py any_path_basically_try_your_luck
     """
 
-    import importlib
     import sys
+    # using import.import_module in asyncio somehow gives us the frozen tracebacks (which were
+    # removed in 2012, but yet showing up again in this case. Let's get rid of them.
+    def code_print_excepthook(t, v, tb):
+        post_mortem(tb, 'longlist', 'exit')
+        return t, v, tb
+    insert_excepthook(code_print_excepthook)
+
+    import importlib
     import pathlib
     import os
 
@@ -66,12 +88,7 @@ if __name__ == '__main__':
 
     print("importing \033[1mautotest\033[0m")
     from autotest import test, filter_traceback # default test runner
-
-    # using import.import_module in asyncio somehow gives us the frozen tracebacks (which were
-    # removed in 2012, but yet showing up again in this case. Let's get rid of them.
-    def excepthook(t, v, tb):
-        sys.__excepthook__(t, v, filter_traceback(tb))
-    sys.excepthook = excepthook
+    insert_excepthook(lambda t, v, tb: t, v, filter_traceback(tb))
 
     with test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True):
         if 'autotest' in modules:
@@ -99,7 +116,6 @@ import types
 import pathlib
 import tempfile
 import sys
-import pdb
 import operator
 import contextlib
 import functools
@@ -129,70 +145,51 @@ sys_defaults = {
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
 
-class BoundTest:
+class TestRun:
+    """ Runs and reports a test function within a given context. """
 
-    def __init__(self, context, f):
+    def __init__(self, context, test_func):
         AUTOTEST_INTERNAL = 1
         self.context = context
-        self._f = bind_1_frame_back(f)
+        self._test_func = bind_1_frame_back(test_func)
 
     def __call__(self, *app_args, **app_kwds):
         AUTOTEST_INTERNAL = 1
         """ Runs f with given fixtues and application args, reporting when necessary. """
         report = self.context.opts.get('report')
         print_msg = print if report else lambda *_, **__: None
-        print_msg(f"{self._f.__module__}  {self._f.__name__}  ", flush=True)
+        print_msg(f"{self._test_func.__module__}  {self._test_func.__name__}  ", flush=True)
         if report:
             self.context.reporter.reported += 1 #TODO encapsulate reporter
         try:
-            return Run(self.context, self._f)(*app_args, **app_kwds)
+            return WithFixtures(self.context, self._test_func)(*app_args, **app_kwds)
         except SystemExit:
             raise
-        except BaseException:
-            et, ev, tb = sys.exc_info()
-            recursive = self.__call__.__code__ in (f.f_code for f in iterate('f_back', tb.tb_frame.f_back))
-            new_tb = filter_traceback(tb)
-            if new_tb is not None: # avoid our own tests to have no traceback left
-                tb = new_tb
-            if ev.args == ():
-                if recursive: # unwind stack to finalize all fixtures before post_portem
-                    raise
-                traceback.print_exception(et, ev, tb)
-                post_mortem(tb, 'longlist')
-                exit(-1)
-            else:
-                # TODO put this in sys.excepthook, to avoid printing it twice
-                #      might be a bit complicated 
-                if report:
-                    post_mortem(tb, 'longlist', 'exit')
-                # NB: this could be raised in a wrapping test, or be the last one
-                raise ev.with_traceback(tb)
         finally:
             self.context.reporter.ran += 1
 
 
 
 class TestContext:
-    """ Defines the context a test runs in: fixtures, reporting, options. """
+    """ Defines the context for tests: fixtures, reporting, options. """
 
     def __init__(self, reporter, fixtures=None, **opts):
-        self.fixtures = {} if fixtures is None else fixtures.copy()
         self.reporter = reporter
+        self.fixtures = {} if fixtures is None else fixtures.copy()
         self.opts = opts
 
     def __call__(self, test_func):
-        AUTOTEST_INTERNAL = 1
-        return self._bind_and_run(test_func, **self.opts)
-
-    def _bind_and_run(self, test_func, *, skip, keep, gather, **opts):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
-        bound_test_func = BoundTest(self, test_func)
+        skip = self.opts.get('skip')
+        keep = self.opts.get('keep')
+        gather = self.opts.get('gather')
+        testrun = TestRun(self, test_func)
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
-            bound_test_func()
+            testrun()
         if gather:
-            self.reporter.gathered.append(bound_test_func)
-        return bound_test_func if keep else None
+            self.reporter.gathered.append(testrun)
+        return testrun if keep else None
 
     def clone(self, **opts):
         return TestContext(self.reporter, fixtures=self.fixtures, **{**self.opts, **opts})
@@ -224,10 +221,8 @@ class Runner:
         """Decorator to define, run and report a test, with one-time options when given. """
         try:
             if opts:
-                # @test(**opts)
-                return self.context.clone(**opts)
-            # @test
-            return self.context(f)
+                return self.context.clone(**opts)      # @test(**opts)
+            return self.context(f)                     # @test
         finally:
             self.found += 1
 
@@ -311,11 +306,11 @@ class Runner:
             or it returns a context manager if name denotes a fixture. """
         if name in self.context.fixtures:
             fx = self.context.fixtures[name]
-            fx_bound = Run(self.context, fx).__call__
+            fx_bound = WithFixtures(self.context, fx)
             if inspect.isgeneratorfunction(fx):
-                return CollectArgsContextManager(fx_bound)
+                return ArgsCollectingContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
-                return CollectArgsAsyncContextManager(fx_bound)
+                return ArgsCollectingAsyncContextManager(fx_bound)
             raise ValueError(f"not an (async) generator: {fx}")
         return getattr(self.Operator(), name)
 
@@ -337,7 +332,7 @@ def filter_traceback(tb):
 
 
 """ Bootstrapping, placeholder, overwritten later """
-class Run:
+class WithFixtures:
     def __init__(self, context, f):
         self._f = f
     def __call__(self, *a, **k):
@@ -345,19 +340,12 @@ class Run:
 
 
 """ Bootstrapping, placeholder, overwritten later """
-CollectArgsContextManager = contextlib.contextmanager
+ArgsCollectingContextManager = contextlib.contextmanager
 
 
+""" Bootstrapping, placeholder, overwritten later """
 def bind_1_frame_back(_func_):
-    """ Bootstrapping, placeholder, overwritten later """
     return _func_
-
-
-def post_mortem(tb, *cmds):
-    p = pdb.Pdb()
-    p.rcLines.extend(cmds)
-    p.reset()
-    p.interaction(None, tb)
 
 
 class lazy_str:
@@ -402,9 +390,7 @@ AsyncContextManagerType = type(contextlib.asynccontextmanager(_a)())
 del _, _a
 
 
-class CollectArgsContextManager(ContextManagerType):
-    """ Context manager that accepts additional args everytime it is called.
-        NB: Implementation closely tied to contexlib.py """
+class ArgsCollector:
     def __init__(self, f, *args, **kwds):
         self.func = f
         self.args = args
@@ -413,23 +399,17 @@ class CollectArgsContextManager(ContextManagerType):
         self.args += args
         self.kwds.update(kwds)
         return self
+
+
+class ArgsCollectingContextManager(ArgsCollector, ContextManagerType):
+    """ Context manager that accepts additional args everytime it is called.
+        NB: Implementation closely tied to contexlib.py """
     def __enter__(self):
         self.gen = self.func(*self.args, **self.kwds)
         return super().__enter__()
 
 
-# NB !!
-# This is partial and untested support for async fixtures
-# Until I understand what I am doing, it will not be supported.
-class CollectArgsAsyncContextManager(AsyncContextManagerType):
-    def __init__(self, f, *args, **kwds):
-        self.func = f
-        self.args = args
-        self.kwds = kwds
-    def __call__(self, *args, **kwds):
-        self.args += args
-        self.kwds.update(kwds)
-        return self
+class ArgsCollectingAsyncContextManager(ArgsCollector, AsyncContextManagerType):
     async def __aenter__(self):
         self.gen = self.func(*self.args, **self.kwds)
         return await super().__aenter__()
@@ -442,7 +422,7 @@ class CollectArgsAsyncContextManager(AsyncContextManagerType):
 def extra_args_supplying_contextmanager():
     def f(a, b, c, *, d, e, f):
         yield a, b, c, d, e, f
-    c = CollectArgsContextManager(f, 'a', d='d')
+    c = ArgsCollectingContextManager(f, 'a', d='d')
     assert isinstance(c, contextlib.AbstractContextManager)
     c('b', e='e')
     with c('c', f='f') as v:
@@ -484,7 +464,7 @@ def ensure_async_generator_func(f):
 
 
 # redefine the placeholder with support for fixtures
-class Run:
+class WithFixtures:
     """ Activates all fixtures recursively, then runs the test function. """
 
     def __init__(self, context, func):
@@ -492,7 +472,17 @@ class Run:
         self._func = func
 
 
+    def __call__(self, *args, **kwds):
+        AUTOTEST_INTERNAL = 1
+        if inspect.iscoroutinefunction(self._func):
+            return asyncio.run(self.async_run_with_fixtures(*args, **kwds), debug=True)
+        with contextlib.ExitStack() as contextmgrstack:
+            # we could use the timeout here too, with a signal handler TODO
+            return self.run_recursively(self._func, contextmgrstack, *args, **kwds)
+
+
     def get_fixtures_except_for(self, f, except_for):
+        """ Finds all fixtures, skips those in except_for (overridden fixtures) """
         AUTOTEST_INTERNAL = 1
         return [self.context.fixtures[name] for name in inspect.signature(f).parameters
                 if name in self.context.fixtures and name not in except_for]
@@ -510,21 +500,21 @@ class Run:
 
     # compare ^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v
 
-    async def async_run_recursively(self, f, context, *args, **kwds):
+    async def async_run_recursively(self, f, contextmgrstack, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         fixture_values = []
         for fx in self.get_fixtures_except_for(f, kwds.keys()):
             ctxmgr_func = contextlib.asynccontextmanager(ensure_async_generator_func(fx))
-            context_mgr = await self.async_run_recursively(ctxmgr_func, context) # args not sinful
-            fixture_values.append(await context.enter_async_context(context_mgr))
+            context_mgr = await self.async_run_recursively(ctxmgr_func, contextmgrstack) # args not sinful
+            fixture_values.append(await contextmgrstack.enter_async_context(context_mgr))
         return f(*fixture_values, *args, **kwds)
 
 
     async def async_run_with_fixtures(self, *args, **kwargs):
         AUTOTEST_INTERNAL = 1
         timeout = self.context.opts.get('timeout')
-        async with contextlib.AsyncExitStack() as context:
-            result = await self.async_run_recursively(self._func, context, *args, **kwargs)
+        async with contextlib.AsyncExitStack() as contextmgrstack:
+            result = await self.async_run_recursively(self._func, contextmgrstack, *args, **kwargs)
             assert inspect.iscoroutine(result)
             loop = asyncio.get_running_loop()
             loop.set_exception_handler(asyncio_filtering_exception_handler)
@@ -537,15 +527,6 @@ class Run:
                 s = p.get_stack() # "only one stack frame is returned for a suspended coroutine"
                 tb1 = frame_to_traceback(s[-1])
                 raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
-
-
-    def __call__(self, *args, **kwds):
-        AUTOTEST_INTERNAL = 1
-        if inspect.iscoroutinefunction(self._func):
-            return asyncio.run(self.async_run_with_fixtures(*args, **kwds), debug=True)
-        with contextlib.ExitStack() as context:
-            # we could use the timeout here too, with a signal handler TODO
-            return self.run_recursively(self._func, context, *args, **kwds)
 
 
 @test.fixture
@@ -571,7 +552,7 @@ def test_a(fx_a, fx_b, a, b=10):
 
 @test
 def test_run_with_fixtures():
-    Run(test.context, test_a)(9, b=11)
+    WithFixtures(test.context, test_a)(9, b=11)
     assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
 
@@ -1429,8 +1410,9 @@ if is_main_process:
         test.fail("Should have failed.")
     except AssertionError as e:
         m = s.getvalue()
-        test.contains(m, "5  ->	    autotest.test.eq(123, 42)")
         test.eq("('eq', 123, 42)", str(e))
+        test.contains(m, "autotest  import_submodule_is_silent_but_does_report_failures")
+        test.contains(m, "sub_module_fail  test_one")
 
 
     try:
@@ -1450,11 +1432,16 @@ if is_main_process:
                     assert False, "should have raised timeout"
             except asyncio.TimeoutError as e:
                 assert "Hanging task (1 of 1)" in str(e), e
-                tb = s.getvalue()
-                assert "timeouts_test" in tb, tb
-                assert "await asyncio.sleep(1)" in tb, tb
+                msg = s.getvalue()
+                assert "timeouts_test" in msg, msg
+                tb = traceback.format_tb(e.__traceback__)
+                assert "await asyncio.sleep(1)" in tb[-1], tb[-1]
 
 
+
+@test
+def probeer():
+    assert False
 
 
 # We put this test last, as it captures output an thus fails when using print
