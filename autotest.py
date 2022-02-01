@@ -38,6 +38,7 @@ def post_mortem(tb, *cmds):
     p.reset()
     p.interaction(None, tb)
 
+
 def insert_excepthook(new_hook):
     prev_excepthook = sys.excepthook
     def hook(*args):
@@ -88,7 +89,7 @@ if __name__ == '__main__':
 
     print("importing \033[1mautotest\033[0m")
     from autotest import test, filter_traceback # default test runner
-    insert_excepthook(lambda t, v, tb: t, v, filter_traceback(tb))
+    insert_excepthook(lambda t, v, tb: (t, v, filter_traceback(tb)))
 
     with test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True):
         if 'autotest' in modules:
@@ -1404,7 +1405,7 @@ if is_main_process:
 
     try:
         with test.stdout as s:
-            @test
+            @test(report=True) # force report, as might be suppressed in other context
             def import_submodule_is_silent_but_does_report_failures():
                 import sub_module_fail
         test.fail("Should have failed.")
@@ -1439,7 +1440,7 @@ if is_main_process:
 
 
 
-@test
+#@test
 def probeer():
     assert False
 
