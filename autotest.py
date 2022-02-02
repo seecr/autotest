@@ -146,28 +146,23 @@ sys_defaults = {
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
 
-class TestRun:
+class WithReport:
     """ Runs and reports a test function within a given context. """
 
     def __init__(self, context, test_func):
         AUTOTEST_INTERNAL = 1
         self.context = context
-        self._test_func = bind_1_frame_back(test_func)
+        self._test_func = test_func
 
-    def __call__(self, *app_args, **app_kwds):
-        AUTOTEST_INTERNAL = 1
+    def __call__(self, *app_args, reporter=None, **app_kwds):
         """ Runs f with given fixtues and application args, reporting when necessary. """
-        report = self.context.opts.get('report')
-        print_msg = print if report else lambda *_, **__: None
-        print_msg(f"{self._test_func.__module__}  {self._test_func.__name__}  ", flush=True)
-        if report:
-            self.context.reporter.reported += 1 #TODO encapsulate reporter
+        AUTOTEST_INTERNAL = 1
+        reporter = reporter or self.context.reporter
+        reporter.start(self)
         try:
             return WithFixtures(self.context, self._test_func)(*app_args, **app_kwds)
-        except SystemExit:
-            raise
         finally:
-            self.context.reporter.ran += 1
+            reporter.done(self)
 
 
 
@@ -185,7 +180,8 @@ class TestContext:
         skip = self.opts.get('skip')
         keep = self.opts.get('keep')
         gather = self.opts.get('gather')
-        testrun = TestRun(self, test_func)
+        test_func = bind_1_frame_back(test_func)
+        testrun = WithReport(self, test_func)
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             testrun()
         if gather:
@@ -208,6 +204,14 @@ class Runner:
     @property
     def context(self):
         return self._context[-1]
+
+    def start(self, test):
+        if test.context.opts.get('report'):
+            print(f"{test._test_func.__module__}  {test._test_func.__name__}  ", flush=True)
+            self.reported += 1
+
+    def done(self, test):
+        self.ran += 1
 
 
     def reset(self):
