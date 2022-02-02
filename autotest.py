@@ -218,8 +218,8 @@ class Runner:
 
 
     def __call__(self, f=None, **opts):
-        AUTOTEST_INTERNAL = 1
         """Decorator to define, run and report a test, with one-time options when given. """
+        AUTOTEST_INTERNAL = 1
         try:
             if opts:
                 return self.context.clone(**opts)      # @test(**opts)
@@ -392,11 +392,14 @@ del _, _a
 
 
 class ArgsCollector:
+    """ collects args before calling a function: ArgsCollector(f, 1)(2)(3)() calls f(1,2,3) """
     def __init__(self, f, *args, **kwds):
         self.func = f
         self.args = args
         self.kwds = kwds
     def __call__(self, *args, **kwds):
+        if not args and not kwds:
+            return self.func(*self.args, **self.kwds)
         self.args += args
         self.kwds.update(kwds)
         return self
@@ -404,15 +407,15 @@ class ArgsCollector:
 
 class ArgsCollectingContextManager(ArgsCollector, ContextManagerType):
     """ Context manager that accepts additional args everytime it is called.
-        NB: Implementation closely tied to contexlib.py """
+        NB: Implementation closely tied to contexlib.py (self.gen)"""
     def __enter__(self):
-        self.gen = self.func(*self.args, **self.kwds)
+        self.gen = self()
         return super().__enter__()
 
 
 class ArgsCollectingAsyncContextManager(ArgsCollector, AsyncContextManagerType):
     async def __aenter__(self):
-        self.gen = self.func(*self.args, **self.kwds)
+        self.gen = self()
         return await super().__aenter__()
     @property
     def __enter__(self):
@@ -1147,8 +1150,8 @@ def use_fixtures_as_context():
     # it is possible to supply additional args when used as context
     with test.fixture_D as d: # only fixture as arg
         assert 10 == d
-    with test.fixture_D() as d: # idem
-        assert 10 == d
+    #with test.fixture_D() as d: # idem
+    #    assert 10 == d
     with test.fixture_D(16) as d: # fixture arg + addtional arg
         assert 16 == d
 
