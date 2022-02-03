@@ -149,20 +149,23 @@ sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items(
 class WithReport:
     """ Runs and reports a test function within a given context. """
 
-    def __init__(self, context, test_func):
+    def __init__(self, report, opts, func):
         AUTOTEST_INTERNAL = 1
-        self.context = context
-        self._test_func = test_func
+        self.opts = opts
+        self.report = report
+        self._func = func
+
+    def __str__(self):
+        return str(self._func)
 
     def __call__(self, *app_args, reporter=None, **app_kwds):
         """ Runs f with given fixtues and application args, reporting when necessary. """
         AUTOTEST_INTERNAL = 1
-        reporter = reporter or self.context.reporter
-        reporter.start(self)
+        self.report.start(self)
         try:
-            return WithFixtures(self.context, self._test_func)(*app_args, **app_kwds)
+            return self._func(*app_args, **app_kwds)
         finally:
-            reporter.done(self)
+            self.report.done(self)
 
 
 
@@ -181,7 +184,8 @@ class TestContext:
         keep = self.opts.get('keep')
         gather = self.opts.get('gather')
         test_func = bind_1_frame_back(test_func)
-        testrun = WithReport(self, test_func)
+        testrun = WithReport(self.reporter, self.opts, WithFixtures(self, test_func))
+        #testrun = WithReport(self, test_func)
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             testrun()
         if gather:
@@ -206,8 +210,8 @@ class Runner:
         return self._context[-1]
 
     def start(self, test):
-        if test.context.opts.get('report'):
-            print(f"{test._test_func.__module__}  {test._test_func.__name__}  ", flush=True)
+        if test.opts.get('report'):  # TODO VEEEEEERY sloppy! should have Rport object
+            print(test, flush=True)
             self.reported += 1
 
     def done(self, test):
@@ -478,6 +482,10 @@ class WithFixtures:
     def __init__(self, context, func):
         self.context = context
         self._func = func
+
+
+    def __str__(self):
+        return f"{self._func.__module__}  {self._func.__name__}  "
 
 
     def __call__(self, *args, **kwds):
