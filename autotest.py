@@ -91,7 +91,7 @@ if __name__ == '__main__':
     from autotest import test, filter_traceback # default test runner
     insert_excepthook(lambda t, v, tb: (t, v, filter_traceback(tb)))
 
-    with test.default(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True):
+    with test.opts(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True):
         if 'autotest' in modules:
             modules.remove('autotest')
         else:
@@ -129,6 +129,9 @@ import unittest.mock as mock
 
 
 
+#TODO
+# 2. extract Report
+
 __all__ = ['test', 'Runner']
 
 
@@ -147,53 +150,62 @@ sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items(
 
 
 class WithReport:
-    """ Runs and reports a test function within a given context. """
+    """ Runs and reports a test. """
 
-    def __init__(self, report, opts, func):
-        AUTOTEST_INTERNAL = 1
-        self.opts = opts
-        self.report = report
-        self._func = func
+    def __init__(self, context, func):
+        self.context = context
+        self.func = func
 
     def __str__(self):
-        return str(self._func)
+        return str(self.func)
 
-    def __call__(self, *app_args, reporter=None, **app_kwds):
-        """ Runs f with given fixtues and application args, reporting when necessary. """
+    def __call__(self, *app_args, **app_kwds):
         AUTOTEST_INTERNAL = 1
-        self.report.start(self)
+        self.context.report.start(self)
         try:
-            return self._func(*app_args, **app_kwds)
+            return self.func(*app_args, **app_kwds)
         finally:
-            self.report.done(self)
+            self.context.report.done(self)
 
 
 
 class TestContext:
     """ Defines the context for tests: fixtures, reporting, options. """
 
-    def __init__(self, reporter, fixtures=None, **opts):
-        self.reporter = reporter
-        self.fixtures = {} if fixtures is None else fixtures.copy()
+    def __init__(self, report, fixtures, gathered, opts):
+        self.report = report
+        self.fixtures = fixtures.copy()
+        self.gathered = gathered
         self.opts = opts
 
     def __call__(self, test_func):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
-        skip = self.opts.get('skip')
-        keep = self.opts.get('keep')
-        gather = self.opts.get('gather')
+        self.report.found += 1
         test_func = bind_1_frame_back(test_func)
-        testrun = WithReport(self.reporter, self.opts, WithFixtures(self, test_func))
-        #testrun = WithReport(self, test_func)
+        testrun = WithReport(self, WithFixtures(self, test_func))
+        skip = self.opts.get('skip')
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             testrun()
-        if gather:
-            self.reporter.gathered.append(testrun)
-        return testrun if keep else None
+        # TODO
+        # What to return here, if you keep or gather the test function?
+        # What happens when you call the test later?
+        # Will it run within the context of definition time?
+        # Or is it useful to be able to alter the context?
+        # - it is already possible to pass fixtures as kwargs
+        # - would it make sense to override report as well?
+        # - would it make sense to override options?
+        # - if so, how?
+        # NB: with kwargs, only fixture *values* can be passed, it would
+        #     be handier if we can pass a fixture (=contextmanager)
+        #     See e.g. how persistenstream runs the 2 suites from basestream
+        if self.opts.get('gather'):
+            self.gathered.append(testrun)
+        return testrun if self.opts.get('keep') else None
 
-    def clone(self, **opts):
-        return TestContext(self.reporter, fixtures=self.fixtures, **{**self.opts, **opts})
+    def clone(self, opts, gathered=None):
+        return TestContext(self.report, self.fixtures,
+                self.gathered if gathered is None else gathered, self.opts | opts)
 
 
 
@@ -202,7 +214,7 @@ class Runner:
 
     def __init__(self, **opts):
         self.reset()
-        self._context = [TestContext(reporter=self, **{**sys_defaults, **opts})]
+        self._context = [TestContext(self, {}, [], sys_defaults | opts)]
 
 
     @property
@@ -210,7 +222,7 @@ class Runner:
         return self._context[-1]
 
     def start(self, test):
-        if test.opts.get('report'):  # TODO VEEEEEERY sloppy! should have Rport object
+        if test.context.opts.get('report'):
             print(test, flush=True)
             self.reported += 1
 
@@ -222,41 +234,31 @@ class Runner:
         self.found = 0
         self.ran = 0
         self.reported = 0
-        self._gathered = [[]]
 
 
     def __call__(self, f=None, **opts):
         """Decorator to define, run and report a test, with one-time options when given. """
         AUTOTEST_INTERNAL = 1
-        try:
-            if opts:
-                return self.context.clone(**opts)      # @test(**opts)
-            return self.context(f)                     # @test
-        finally:
-            self.found += 1
+        if opts:
+            return self.context.clone(opts)
+        return self.context(f)
 
 
     @contextlib.contextmanager
-    def default(self, **kws):
+    def opts(self, gathered=None, **opts):
         """ Set default options for next tests."""
-        self._context.append(self.context.clone(**kws))
+        self._context.append(self.context.clone(opts, gathered=gathered))
         try:
-            with self: # also create new gathering context
-                yield self
+            yield self
         finally:
             self._context.pop()
 
 
-    @property
-    def gathered(self):
-        return self._gathered[-1]
-
-    def __enter__(self):
-        self._gathered.append([])
-        return self
-
-    def __exit__(self, *_):
-        self._gathered.pop()
+    @contextlib.contextmanager
+    def gather(self, gather=True, **opts):
+        g = []
+        with self.opts(gathered=g, gather=gather, **opts):
+            yield g
 
 
     def fail(self, *args, **kwds):
@@ -772,13 +774,13 @@ def test_testop_has_args():
         test.eq("('eq', 42, 67)", str(e))
 
 
-with test.default(report=False):
+with test.opts(report=False):
     @test
     def nested_defaults():
         dflts0 = test.context.opts
         assert not dflts0['skip']
         assert not dflts0['report']
-        with test.default(skip=True, report=True):
+        with test.opts(skip=True, report=True):
             dflts1 = test.context.opts
             assert dflts1['skip']
             assert dflts1['report']
@@ -786,7 +788,7 @@ with test.default(report=False):
             def fails_but_is_skipped():
                 test.eq(1, 2)
             try:
-                with test.default(skip=False, report=False) as TeSt:
+                with test.opts(skip=False, report=False) as TeSt:
                     dflts2 = TeSt.context.opts
                     assert not dflts2['skip']
                     assert not dflts2['report']
@@ -801,7 +803,7 @@ with test.default(report=False):
 
 @test
 def gather_tests():
-    with test.default(gather=True):
+    with test.gather() as suite:
 
         @test.fixture
         def a_fixture():
@@ -810,23 +812,19 @@ def gather_tests():
         @test(skip=True)
         def t0(a_fixture): return f'this is t0, with {a_fixture}'
 
-        with test:
+        with test.gather() as subsuite0:
             @test
             def sub0(): return 78
-            subsuite0 = test.gathered
 
-        with test.default(report=True):
+        with test.gather(report=True) as subsuite1:
             @test
             def sub1(): return 56
-            subsuite1 = test.gathered
 
         @test
         def t1(a_fixture): return f'this is t1, with {a_fixture}'
 
         @test(gather=False)
         def t2(): pass
-
-        suite = test.gathered
 
     test.eq(1, len(subsuite0))
     test.eq(78, subsuite0[0]())
@@ -835,6 +833,9 @@ def gather_tests():
     test.eq(2, len(suite))
     test.eq('this is t0, with 42', suite[0](a_fixture=42))
     test.eq('this is t1, with 16', suite[1]())
+    test.eq(1, len(subsuite0))
+    test.eq(1, len(subsuite1))
+    test.eq(2, len(suite))
 
 
 @test
@@ -1277,7 +1278,7 @@ def bind_test_functions_to_their_fixtures():
             return a
         assert 34 == bound_fixture_acces_class_locals()
 
-    with test.default(keep=True):
+    with test.opts(keep=True):
 
         @test
         def bound_by_default(my_fix):
@@ -1439,7 +1440,7 @@ if is_main_process:
         pass
 
 
-    with test.default(report=True):
+    with test.opts(report=True):
         with test.stdout as s:
             try:
                 @test(timeout=0.1)
