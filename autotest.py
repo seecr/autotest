@@ -94,8 +94,6 @@ if __name__ == '__main__':
     with test.opts(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True):
         if 'autotest' in modules:
             modules.remove('autotest')
-        else:
-            test.reset()
 
         for qname in modules:
             names = qname.split('.')
@@ -107,7 +105,8 @@ if __name__ == '__main__':
                     print(f"importing tests from \033[1m{name}\033[0m")
                     importlib.import_module(name)
 
-        print(f"Found \033[1m{test.found}\033[0m unique tests, ran \033[1m{test.ran}\033[0m, reported \033[1m{test.reported}\033[0m.")
+        report = test.context.report
+        print(f"Found \033[1m{report.total}\033[0m unique tests, ran \033[1m{report.ran}\033[0m, reported \033[1m{report.reported}\033[0m.")
     exit(0)
 
 
@@ -128,9 +127,6 @@ import pprint
 import unittest.mock as mock
 
 
-
-#TODO
-# 2. extract Report
 
 __all__ = ['test', 'Runner']
 
@@ -181,7 +177,7 @@ class TestContext:
     def __call__(self, test_func):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
-        self.report.found += 1
+        self.report.found(self)
         test_func = bind_1_frame_back(test_func)
         testrun = WithReport(self, WithFixtures(self, test_func))
         skip = self.opts.get('skip')
@@ -208,18 +204,11 @@ class TestContext:
                 self.gathered if gathered is None else gathered, self.opts | opts)
 
 
-
-class Runner:
-    """ Main tool for running tests across modules and programs. """
-
-    def __init__(self, **opts):
-        self.reset()
-        self._context = [TestContext(self, {}, [], sys_defaults | opts)]
-
-
-    @property
-    def context(self):
-        return self._context[-1]
+class Report:
+    def __init__(self):
+        self.total = 0
+        self.ran = 0
+        self.reported = 0
 
     def start(self, test):
         if test.context.opts.get('report'):
@@ -229,11 +218,21 @@ class Runner:
     def done(self, test):
         self.ran += 1
 
+    def found(self, context):
+        self.total += 1
 
-    def reset(self):
-        self.found = 0
-        self.ran = 0
-        self.reported = 0
+
+
+class Runner:
+    """ Main tool for running tests across modules and programs. """
+
+    def __init__(self, **opts):
+        self._context = [TestContext(Report(), {}, [], sys_defaults | opts)]
+
+
+    @property
+    def context(self):
+        return self._context[-1]
 
 
     def __call__(self, f=None, **opts):
