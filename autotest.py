@@ -226,13 +226,15 @@ class Runner:
     def __call__(self, *fs, **opts):
         """Decorator to define, run and report a test, with one-time options when given. """
         AUTOTEST_INTERNAL = 1
-        if opts:
+        if opts and not fs:
             return self.context.clone(opts)       # @test(opt=value,...)
         elif len(fs) == 1:
-            return self.context(*fs)              # @test or test(f)
+            with self.opts(**opts):
+                return self.context(*fs)          # @test or test(f, **opts)
         elif len(fs) > 1:
-            for f in fs:                          # test(*suite)
-                self.context(f)
+            with self.opts(**opts):
+                for f in fs:                      # test(*suite)
+                    self.context(f)
         else:
             return self.opts()                    # with test():
 
@@ -811,7 +813,6 @@ with test.opts(report=False):
             assert "new_one" not in ctx0.fixtures
 
 
-
 @test
 def override_fixtures_in_new_context():
     with test() as t:
@@ -834,6 +835,19 @@ def override_fixtures_in_new_context():
     except AttributeError:
         pass
 
+@test
+def combine_test_with_options():
+    trace = []
+    @test(keep=True, my_opt=42)
+    def f0():
+        trace.append(test.context.opts.get('my_opt'))
+    def f1(): # ordinary function; the only difference, here(!) is binding
+        trace.append(test.context.opts.get('my_opt'))
+    test(f0)
+    test(f0, my_opt=76)
+    test(f0, f1, my_opt=93)
+    assert [None, None, 76, 93, 93] == trace, trace
+    # TODO make opts available in test when specificed in @test 
 
 
 
