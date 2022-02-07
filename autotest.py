@@ -178,26 +178,14 @@ class TestContext:
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
         self.report.found(self)
-        test_func = bind_1_frame_back(test_func)
-        testrun = WithReport(self, WithFixtures(self, test_func))
+        bind_func = bind_1_frame_back(test_func)
+        withreport = WithReport(self, WithFixtures(self, bind_func))
         skip = self.opts.get('skip')
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
-            testrun()
-        # TODO
-        # What to return here, if you keep or gather the test function?
-        # What happens when you call the test later?
-        # Will it run within the context of definition time?
-        # Or is it useful to be able to alter the context?
-        # - it is already possible to pass fixtures as kwargs
-        # - would it make sense to override report as well?
-        # - would it make sense to override options?
-        # - if so, how?
-        # NB: with kwargs, only fixture *values* can be passed, it would
-        #     be handier if we can pass a fixture (=contextmanager)
-        #     See e.g. how persistenstream runs the 2 suites from basestream
+            withreport()
         if self.opts.get('gather'):
-            self.gathered.append(testrun)
-        return testrun if self.opts.get('keep') else None
+            self.gathered.append(bind_func)
+        return bind_func if self.opts.get('keep') else None
 
     def clone(self, opts, gathered=None):
         return TestContext(self.report, self.fixtures,
@@ -235,12 +223,18 @@ class Runner:
         return self._context[-1]
 
 
-    def __call__(self, f=None, **opts):
+    def __call__(self, *fs, **opts):
         """Decorator to define, run and report a test, with one-time options when given. """
         AUTOTEST_INTERNAL = 1
         if opts:
-            return self.context.clone(opts)
-        return self.context(f)
+            return self.context.clone(opts)       # @test(opt=value,...)
+        elif len(fs) == 1:
+            return self.context(*fs)              # @test or test(f)
+        elif len(fs) > 1:
+            for f in fs:                          # test(*suite)
+                self.context(f)
+        else:
+            return self.opts()                    # with test():
 
 
     @contextlib.contextmanager
@@ -800,6 +794,49 @@ with test.opts(report=False):
                 test.eq("('gt', 1, 2)", str(e))
         assert test.context.opts == dflts0
 
+    @test
+    def shorthand_for_new_context_without_opts():
+        """ Use this for defining new/tmp fixtures. """
+        ctx0 = test.context
+        with test() as t: # == test.opts()
+            assert ctx0 != t.context
+            assert ctx0.fixtures == t.context.fixtures
+            assert ctx0.report == t.context.report
+            assert ctx0.opts == t.context.opts
+            @test.fixture
+            def new_one():
+                yield 42
+            assert ctx0.fixtures != t.context.fixtures
+            assert "new_one" in t.context.fixtures
+            assert "new_one" not in ctx0.fixtures
+
+
+
+@test
+def override_fixtures_in_new_context():
+    with test() as t:
+        assert test == t
+        @test.fixture
+        def temporary_fixture():
+            yield "tmp one"
+        with t.temporary_fixture as tf1:
+            assert "tmp one" == tf1
+        with test():
+            @test.fixture
+            def temporary_fixture():
+                yield "tmp two"
+            with test.temporary_fixture as tf2:
+                assert "tmp two" == tf2
+        with t.temporary_fixture as tf1:
+            assert "tmp one" == tf1
+    try:
+        test.temporary_fixture
+    except AttributeError:
+        pass
+
+
+
+
 @test
 def gather_tests():
     with test.gather() as suite:
@@ -831,10 +868,39 @@ def gather_tests():
     test.eq(56, subsuite1[0]())
     test.eq(2, len(suite))
     test.eq('this is t0, with 42', suite[0](a_fixture=42))
+    """ deprecated; we could reintroduce 'bind' option to allow this
     test.eq('this is t1, with 16', suite[1]())
+    """
     test.eq(1, len(subsuite0))
     test.eq(1, len(subsuite1))
     test.eq(2, len(suite))
+
+@test
+def run_suite():
+    trace = []
+    with test.gather(keep=True) as suite:
+        @test.fixture
+        def a():
+            yield 42
+        @test
+        def a1(a):
+            assert 0 == a % 42
+            trace.append(f"a1:{a}")
+        @test
+        def a2(a):
+            assert 0 == a % 42
+            trace.append(f"a2:{a}")
+    # run in new context
+    with test():
+        @test.fixture
+        def a():
+            yield 84
+        test(a1) 
+        test(suite[0])
+        test(*suite)
+        test(a1, a2)
+        # just to be sure
+        test.eq(["a1:42", "a2:42", "a1:84", "a1:84", "a1:84", "a2:84", "a1:84", "a2:84"], trace)
 
 
 @test
@@ -869,6 +935,21 @@ def test_calls_other_test_with_fixture_and_more_args():
     @test(report=False)
     def test_b(fixture_A):
         assert test_a(fixture_A=42, value=16)
+
+
+# IDEA/TODO
+# I make this mistake a lot:
+# Instead of @test(option=Value)
+# I write def test(open=Value)
+# I think supporting both is a good idea
+
+@test
+def call_test_with_complete_context():
+    @test(keep=True)
+    def a_test():
+        assert True
+    assert a_test
+    test(a_test)
 
 
 def capture(name):
@@ -1239,33 +1320,48 @@ def bind_test_functions_to_their_fixtures():
 
     @test(skip=True, keep=True, report=True)
     def override_fixture_binding_with_kwarg(my_fix):
-        assert 34 != my_fix
+        assert 34 != my_fix, "should be 34"
         assert 56 == my_fix
         return my_fix
 
-    with test.stdout as s:
-        override_fixture_binding_with_kwarg(my_fix=56) # fixture binding overridden
-    assert "  override_fixture_binding_with_kwarg  \n" in s.getvalue(), repr(s.getvalue())
+    v = override_fixture_binding_with_kwarg(my_fix=56) # fixture binding overridden
+    assert v == 56
+
+    try:
+        test(override_fixture_binding_with_kwarg)
+    except AssertionError as e:
+        test.eq("should be 34", str(e))
 
 
     @test(keep=True)
     def bound_fixture_1(my_fix):
-        assert 34 == my_fix
+        assert 34 == my_fix, my_fix
         return my_fix
 
-    assert 34 == bound_fixture_1() # no need to pass args, already bound
+    # general way to rerun a test with other fixtures:
+    with test.opts():
+        @test.fixture
+        def my_fix():
+            yield 89
+        try:
+            test(bound_fixture_1)
+        except AssertionError as e:
+            assert "89" == str(e)
+    with test.my_fix as x:
+        assert 34 == x # old fixture back
 
     @test.fixture
     def my_fix(): # redefine fixture purposely to test time of binding
         yield 78
 
+    """ deprecated
     @test(keep=True, skip=True) # skip, need more args
     def bound_fixture_2(my_fix, result, *, extra=None):
         assert 78 == my_fix
         return result, extra
 
-    assert 34 == bound_fixture_1() # no need to pass args, already bound
     assert (56, "top") == bound_fixture_2(56, extra="top") # no need to pass args, already bound
+    """
 
     class A:
         a = 34
@@ -1275,8 +1371,9 @@ def bind_test_functions_to_their_fixtures():
             assert 78 == my_fix
             assert 34 == a
             return a
-        assert 34 == bound_fixture_acces_class_locals()
+        assert 34 == bound_fixture_acces_class_locals(78)
 
+    """ deprecated
     with test.opts(keep=True):
 
         @test
@@ -1285,6 +1382,7 @@ def bind_test_functions_to_their_fixtures():
             return my_fix
 
         assert 78 == bound_by_default()
+    """
 
     trace = []
 
@@ -1299,9 +1397,9 @@ def bind_test_functions_to_their_fixtures():
         return True
 
     assert [] == trace
-    assert rebind_on_every_call()
+    test(rebind_on_every_call)
     assert ['S', 'E'] == trace
-    assert rebind_on_every_call()
+    test(rebind_on_every_call)
     assert ['S', 'E', 'S', 'E'] == trace
 
 
