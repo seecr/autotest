@@ -33,6 +33,7 @@
 import pdb
 import sys
 
+
 def post_mortem(tb, *cmds):
     p = pdb.Pdb()
     p.rcLines.extend(cmds)
@@ -117,11 +118,13 @@ if __name__ == '__main__':
     # 1. test
     # 2. turn on/off
     # 3. report coverage only for given test modules
+    # 4. figure out where to put this
     # NB: sys.base_prefix is hard path while sys.prefix can be virtualized
-    import trace
-    t = trace.Trace(count=1, trace=0, ignoredirs=[sys.base_prefix, sys.base_exec_prefix, sys.prefix, sys.exec_prefix])
-    t.runfunc(main)
-    t.results().write_results(summary=True)
+    #import trace
+    #t = trace.Trace(count=1, trace=0, ignoredirs=[sys.base_prefix, sys.base_exec_prefix, sys.prefix, sys.exec_prefix])
+    #t.runfunc(main)
+    main()
+    #t.results().write_results(summary=True)
     exit(0)
 
 
@@ -155,6 +158,8 @@ sys_defaults = {
     'report'  : True,       # Do reporting when starting a test.
     'gather'  : False,      # Gather tests, use gathered() to get them
     'timeout' : 2,          # asyncio task timeout
+    'coverage': False,      # invoke trace module
+    'debug'   : True,       # use debug for asyncio.run
 }
 
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
@@ -235,7 +240,10 @@ class Runner:
             return self.context.clone(opts)       # @test(opt=value,...)
         elif len(fs) == 1:
             with self.opts(**opts):
-                return self.context(*fs)          # @test or test(f, **opts)
+                f, = fs
+                if isinstance(f, tuple):
+                    return self.context(*f)
+                return self.context(*fs)           # @test or test(f, **opts)
         elif len(fs) > 1:
             with self.opts(**opts):
                 for f in fs:                      # test(*suite)
@@ -282,8 +290,8 @@ class Runner:
             lambda:
                 '\n' + '\n'.join(
                     difflib.ndiff(
-                        pprint.pformat(a).splitlines(),
-                        pprint.pformat(b).splitlines())))
+                        pprint.pformat(a, width=100000).splitlines(),
+                        pprint.pformat(b, width=100000).splitlines())))
 
     class Operator:
         def __init__(self, test=bool):
@@ -350,8 +358,7 @@ class WithFixtures:
     def __call__(self, *a, **k):
         return self.func(*a, **k)
     def __str__(self):
-        return f"{self.func.__module__}  {self.func.__name__}  "
-
+        return f"{self.func.__module__}  \33[1m{self.func.__name__}\033[0m  "
 
 
 
@@ -492,13 +499,13 @@ class WithFixtures:
 
 
     def __str__(self):
-        return f"{self.func.__module__}  {self.func.__name__}  "
+        return f"{self.func.__module__}  \33[1m{self.func.__name__}\033[0m  "
 
 
     def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         if inspect.iscoroutinefunction(self.func):
-            return asyncio.run(self.async_run_with_fixtures(*args, **kwds), debug=True)
+            return asyncio.run(self.async_run_with_fixtures(*args, **kwds), debug=self.context.opts.get('debug'))
         with contextlib.ExitStack() as contextmgrstack:
             # we could use the timeout here too, with a signal handler TODO
             return self.run_recursively(self.func, contextmgrstack, *args, **kwds)
@@ -507,17 +514,20 @@ class WithFixtures:
     def get_fixtures_except_for(self, f, except_for):
         """ Finds all fixtures, skips those in except_for (overridden fixtures) """
         AUTOTEST_INTERNAL = 1
-        return [self.context.fixtures[name] for name in inspect.signature(f).parameters
+        def args(p):
+            a = () if p.annotation == inspect.Parameter.empty else p.annotation
+            return a if isinstance(a, tuple) else (a,)
+        return [(self.context.fixtures[name], args(p)) for name, p in inspect.signature(f).parameters.items()
                 if name in self.context.fixtures and name not in except_for]
 
 
     def run_recursively(self, f, contextmgrstack, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         fixture_values = []
-        for fx in self.get_fixtures_except_for(f, kwds.keys()):
+        for fx, fx_args in self.get_fixtures_except_for(f, kwds.keys()):
             assert inspect.isgeneratorfunction(fx), f"function '{self.func.__name__}' cannot have async fixture '{fx.__name__}'."
             ctxmgr_func = contextlib.contextmanager(fx)
-            context_mgr = self.run_recursively(ctxmgr_func, contextmgrstack) # args not sinful
+            context_mgr = self.run_recursively(ctxmgr_func, contextmgrstack, *fx_args)
             fixture_values.append(contextmgrstack.enter_context(context_mgr))
         return f(*fixture_values, *args, **kwds)
 
@@ -526,9 +536,9 @@ class WithFixtures:
     async def async_run_recursively(self, f, contextmgrstack, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         fixture_values = []
-        for fx in self.get_fixtures_except_for(f, kwds.keys()):
+        for fx, fx_args in self.get_fixtures_except_for(f, kwds.keys()):
             ctxmgr_func = contextlib.asynccontextmanager(ensure_async_generator_func(fx))
-            context_mgr = await self.async_run_recursively(ctxmgr_func, contextmgrstack) # args not sinful
+            context_mgr = await self.async_run_recursively(ctxmgr_func, contextmgrstack, *fx_args)
             fixture_values.append(await contextmgrstack.enter_async_context(context_mgr))
         return f(*fixture_values, *args, **kwds)
 
@@ -626,8 +636,6 @@ class lifetime:
         assert ['A-live', 'B-live', 'C-live', 'C-close', 'B-close', 'A-close'] == fixture_lifetime, fixture_lifetime
 
 
-# Async fixtures require quite a refactoring as everything becomes async, but we still want
-# to support sync code.
 class async_fixtures:
 
     @test.fixture
@@ -678,9 +686,13 @@ class async_fixtures:
 
 # define, test and install default fixture
 # do not use @test.fixture as we need to install this twice
-def tmp_path():
+def tmp_path(name=None):
     with tempfile.TemporaryDirectory() as p:
-        yield pathlib.Path(p)
+        p = pathlib.Path(p)
+        if name:
+            yield p/name
+        else:
+            yield p
 test.fixture(tmp_path)
 
 
@@ -704,6 +716,12 @@ class tmp_files:
 
     @test
     async def temp_async(tmp_path):
+        assert tmp_path.exists()
+
+    @test
+    def temp_dir_with_file(tmp_path:'aap'):
+        assert str(tmp_path).endswith('/aap')
+        tmp_path.write_text('hi monkey')
         assert tmp_path.exists()
 
 
@@ -845,6 +863,32 @@ def override_fixtures_in_new_context():
     except AttributeError:
         pass
 
+
+@test.fixture
+def area(r, d=1):
+    import math
+    yield round(math.pi * r * r, d)
+
+@test
+def fixtures_with_1_arg(area:3):
+    test.eq(28.3, area)
+@test
+def fixtures_with_2_args(area:(3,0)):
+    test.eq(28.0, area)
+@test
+async def fixtures_with_2_args_async(area:(3,2)):
+    test.eq(28.27, area)
+
+@test.fixture
+def answer(): yield 42
+@test.fixture
+def combine(a, area:2, answer): yield a * area * answer
+@test
+def fixtures_with_combined_args(combine:3):
+    test.eq(1587.6, combine)
+
+
+
 @test
 def combine_test_with_options():
     trace = []
@@ -893,6 +937,7 @@ def gather_tests():
     test.eq(1, len(subsuite1))
     test.eq(56, subsuite1[0]())
     test.eq(2, len(suite))
+    # NB: running test function without context (reporting etc):
     test.eq('this is t0, with 42', suite[0](a_fixture=42))
     """ deprecated; we could reintroduce 'bind' option to allow this
     test.eq('this is t1, with 16', suite[1]())
@@ -921,12 +966,14 @@ def run_suite():
         @test.fixture
         def a():
             yield 84
+        # different ways to run a test function:
+        a1(126)            # NB: no context at all, not reported
         test(a1) 
         test(suite[0])
         test(*suite)
         test(a1, a2)
         # just to be sure
-        test.eq(["a1:42", "a2:42", "a1:84", "a1:84", "a1:84", "a2:84", "a1:84", "a2:84"], trace)
+        test.eq(["a1:42", "a2:42", "a1:126", "a1:84", "a1:84", "a1:84", "a2:84", "a1:84", "a2:84"], trace)
 
 
 @test
@@ -1057,9 +1104,10 @@ def raises(exception=Exception, message=None):
             e.__suppress_context__ = True
             raise e
     except BaseException as e:
+        tb = e.__traceback__
         e = AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}")
         e.__suppress_context__ = True
-        raise e
+        raise e.with_traceback(tb)
     else:
         e = AssertionError(f"should raise {exception.__name__}")
         e.__suppress_context__ = True
@@ -1125,8 +1173,10 @@ def import_syntax_error():
 
 
 def is_internal(frame):
+    nm = frame.f_code.co_filename
     return 'AUTOTEST_INTERNAL' in frame.f_code.co_varnames or \
-           '/usr/lib/python' in frame.f_code.co_filename
+           '<frozen importlib' in nm or \
+           '/usr/lib/python' in nm
 
 
 def bind_names(bindings, names, frame):
@@ -1148,7 +1198,7 @@ def bind_names(bindings, names, frame):
 
 def bind_1_frame_back(func):
     """ Binds the unbound vars in func to values found on the stack """
-    return types.FunctionType(
+    func2 = types.FunctionType(
                func.__code__,                      # code
                bind_names(                         # globals
                    func.__globals__.copy(),
@@ -1157,6 +1207,8 @@ def bind_1_frame_back(func):
                func.__name__,                      # name
                func.__defaults__,                  # default arguments
                func.__closure__)                   # closure/free vars
+    func2.__annotations__ = func.__annotations__   # annotations not in __init__
+    return func2
 
 
 M = 'module scope'
@@ -1551,8 +1603,8 @@ if is_main_process:
     except AssertionError as e:
         m = s.getvalue()
         test.eq("('eq', 123, 42)", str(e))
-        test.contains(m, "autotest  import_submodule_is_silent_but_does_report_failures")
-        test.contains(m, "sub_module_fail  test_one")
+        test.contains(m, "autotest  \033[1mimport_submodule_is_silent_but_does_report_failures\033[0m")
+        test.contains(m, "sub_module_fail  \033[1mtest_one\033[0m")
 
 
     try:
@@ -1612,7 +1664,7 @@ def reporting_tests(stdout):
         assert "test_with_reporting_and_failure_raised" == tbi[-1].name, tbi[-1].name
         assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
     m = stdout.getvalue()
-    test.contains(m, "autotest  test_with_reporting_and_failure_raised")
+    test.contains(m, "autotest  \033[1mtest_with_reporting_and_failure_raised\033[0m")
 
 
 class wildcard:
