@@ -1692,7 +1692,7 @@ for fx in (tmp_path, stdout, stderr, raises):
 
 
 
-@test
+#@test
 def setup_correct():
     sys.argv = ['', 'sdist']
     from setup import setup, version
