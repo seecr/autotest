@@ -1169,7 +1169,7 @@ def child():
 
 
 def import_syntax_error():
-    import sub_module_syntax_error
+    import sub_autotest.sub_module_syntax_error
 
 
 def is_internal(frame):
@@ -1587,7 +1587,7 @@ if is_main_process:
 
     @test
     def import_submodule(stdout):
-        import sub_module_ok
+        import sub_autotest.sub_module_ok
         m = stdout.getvalue()
         test.contains(m, "sub_module_ok")
         test.contains(m, "test_one")
@@ -1598,7 +1598,7 @@ if is_main_process:
         with test.stdout as s:
             @test(report=True) # force report, as might be suppressed in other context
             def import_submodule_is_silent_but_does_report_failures():
-                import sub_module_fail
+                import sub_autotest.sub_module_fail
         test.fail("Should have failed.")
     except AssertionError as e:
         m = s.getvalue()
@@ -1692,7 +1692,7 @@ def setup_correct():
     from setup import setup
     from tarfile import open
     tf = open(name='dist/autotest-0.1.0.tar.gz', mode='r:gz')
-    test.eq(['autotest-0.1.0', 'autotest-0.1.0/LICENSE', 'autotest-0.1.0/PKG-INFO', 'autotest-0.1.0/README.rst', 'autotest-0.1.0/autotest.py', 'autotest-0.1.0/setup.py', 'autotest-0.1.0/sub_module_fail.py', 'autotest-0.1.0/sub_module_ok.py', 'autotest-0.1.0/sub_module_syntax_error.py', 'autotest-0.1.0/temporary_class_namespace.py'],
+    test.eq(['autotest-0.1.0', 'autotest-0.1.0/LICENSE', 'autotest-0.1.0/PKG-INFO', 'autotest-0.1.0/README.rst', 'autotest-0.1.0/autotest.py', 'autotest-0.1.0/setup.py', 'autotest-0.1.0/sub_autotest.sub_module_fail.py', 'autotest-0.1.0/sub_autotest.sub_module_ok.py', 'autotest-0.1.0/sub_autotest.sub_module_syntax_error.py', 'autotest-0.1.0/temporary_class_namespace.py'],
             tf.getnames())
     tf.close()
 
