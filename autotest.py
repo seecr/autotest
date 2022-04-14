@@ -1169,8 +1169,14 @@ def child():
 
 
 def import_syntax_error():
-    import sub_autotest.sub_module_syntax_error
-
+    with test.tmp_path() as p:
+        import sys
+        try:
+            sys.path.append(str(p))
+            (p/'my_sub_module_syntax_error').write_text('syntax error')
+            import my_sub_module_syntax_error
+        finally:
+            sys.path.remove(str(p))
 
 def is_internal(frame):
     nm = frame.f_code.co_filename
@@ -1709,7 +1715,6 @@ def setup_correct():
              f'autotest-{version}/sub_autotest/__init__.py',
              f'autotest-{version}/sub_autotest/sub_module_fail.py',
              f'autotest-{version}/sub_autotest/sub_module_ok.py',
-             f'autotest-{version}/sub_autotest/sub_module_syntax_error.py',
              f'autotest-{version}/sub_autotest/temporary_class_namespace.py'],
             tf.getnames(), msg=test.diff)
     tf.close()
