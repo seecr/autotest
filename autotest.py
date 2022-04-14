@@ -1686,7 +1686,7 @@ for fx in (tmp_path, stdout, stderr, raises):
 
 
 
-#@test
+@test
 def setup_correct():
     sys.argv = ['', 'sdist']
     from setup import setup, version
@@ -1694,9 +1694,16 @@ def setup_correct():
     tf = open(name=f'dist/autotest-{version}.tar.gz', mode='r:gz')
     test.eq([f'autotest-{version}',
              f'autotest-{version}/LICENSE',
+             f'autotest-{version}/MANIFEST.in',
              f'autotest-{version}/PKG-INFO',
              f'autotest-{version}/README.rst',
+             f'autotest-{version}/autotest.egg-info',
+             f'autotest-{version}/autotest.egg-info/PKG-INFO',
+             f'autotest-{version}/autotest.egg-info/SOURCES.txt',
+             f'autotest-{version}/autotest.egg-info/dependency_links.txt',
+             f'autotest-{version}/autotest.egg-info/top_level.txt',
              f'autotest-{version}/autotest.py',
+             f'autotest-{version}/setup.cfg',
              f'autotest-{version}/setup.py',
              f'autotest-{version}/sub_autotest',
              f'autotest-{version}/sub_autotest/__init__.py',
@@ -1704,7 +1711,7 @@ def setup_correct():
              f'autotest-{version}/sub_autotest/sub_module_ok.py',
              f'autotest-{version}/sub_autotest/sub_module_syntax_error.py',
              f'autotest-{version}/sub_autotest/temporary_class_namespace.py'],
-            tf.getnames())
+            tf.getnames(), msg=test.diff)
     tf.close()
 
 

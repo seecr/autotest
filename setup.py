@@ -22,7 +22,12 @@
 #
 ## end license ##
 
-from distutils.core import setup
+from setuptools import setup, find_packages
+import pathlib
+
+here = pathlib.Path(__file__).parent.resolve()
+
+long_description = (here/"README.rst").read_text(encoding="utf-8")
 
 version='0.1.1'
 
@@ -30,10 +35,18 @@ setup(
     name='autotest',
     version=version,
     description='Python Testing Library',
+    long_description=long_description,
+    long_description_content_type='text/x-rst',
+    packages=find_packages(here/'sub_autotest'),
     author='Erik Groeneveld',
     author_email='erik@seecr.nl',
     url='https://github.com/seecr/autotest',
-    # files are included in MANIFEST.in
     scripts=["autotest.py"],
+    classifiers=[
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+        'Topic :: Software Development :: Testing',
+        'Topic :: Software Development :: Testing :: Unit',
+        'Programming Language :: Python :: 3',
+    ],
 )
 
