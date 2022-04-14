@@ -1686,13 +1686,24 @@ for fx in (tmp_path, stdout, stderr, raises):
 
 
 
-###@test
+#@test
 def setup_correct():
     sys.argv = ['', 'sdist']
-    from setup import setup
+    from setup import setup, version
     from tarfile import open
-    tf = open(name='dist/autotest-0.1.0.tar.gz', mode='r:gz')
-    test.eq(['autotest-0.1.0', 'autotest-0.1.0/LICENSE', 'autotest-0.1.0/PKG-INFO', 'autotest-0.1.0/README.rst', 'autotest-0.1.0/autotest.py', 'autotest-0.1.0/setup.py', 'autotest-0.1.0/sub_autotest.sub_module_fail.py', 'autotest-0.1.0/sub_autotest.sub_module_ok.py', 'autotest-0.1.0/sub_autotest.sub_module_syntax_error.py', 'autotest-0.1.0/temporary_class_namespace.py'],
+    tf = open(name=f'dist/autotest-{version}.tar.gz', mode='r:gz')
+    test.eq([f'autotest-{version}',
+             f'autotest-{version}/LICENSE',
+             f'autotest-{version}/PKG-INFO',
+             f'autotest-{version}/README.rst',
+             f'autotest-{version}/autotest.py',
+             f'autotest-{version}/setup.py',
+             f'autotest-{version}/sub_autotest',
+             f'autotest-{version}/sub_autotest/__init__.py',
+             f'autotest-{version}/sub_autotest/sub_module_fail.py',
+             f'autotest-{version}/sub_autotest/sub_module_ok.py',
+             f'autotest-{version}/sub_autotest/sub_module_syntax_error.py',
+             f'autotest-{version}/sub_autotest/temporary_class_namespace.py'],
             tf.getnames())
     tf.close()
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 ## begin license ##
 #
 # "Autotest": a simpler test runner for python
@@ -21,19 +20,3 @@
 # along with "Autotest".  If not, see <http://www.gnu.org/licenses/>.
 #
 ## end license ##
-
-from distutils.core import setup
-
-version='0.1.1'
-
-setup(
-    name='autotest',
-    version=version,
-    description='Python Testing Library',
-    author='Erik Groeneveld',
-    author_email='erik@seecr.nl',
-    url='https://github.com/seecr/autotest',
-    # files are included in MANIFEST.in
-    scripts=["autotest.py"],
-)
-
