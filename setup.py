@@ -37,7 +37,7 @@ setup(
     description='Python Testing Library',
     long_description=long_description,
     long_description_content_type='text/x-rst',
-    packages=find_packages(here/'sub_autotest'),
+    packages=find_packages(here),
     author='Erik Groeneveld',
     author_email='erik@seecr.nl',
     url='https://github.com/seecr/autotest',
