@@ -29,7 +29,7 @@ here = pathlib.Path(__file__).parent.resolve()
 
 long_description = (here/"README.rst").read_text(encoding="utf-8")
 
-version='0.1.1'
+version='0.1.2'
 
 setup(
     name='autotest',
@@ -37,11 +37,11 @@ setup(
     description='Python Testing Library',
     long_description=long_description,
     long_description_content_type='text/x-rst',
-    packages=find_packages(here),
+    packages=find_packages(),
     author='Erik Groeneveld',
     author_email='erik@seecr.nl',
     url='https://github.com/seecr/autotest',
-    scripts=["autotest.py"],
+    scripts=["bin/autotest"],
     classifiers=[
         'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
         'Topic :: Software Development :: Testing',

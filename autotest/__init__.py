@@ -111,21 +111,6 @@ def main():
         report.report()
 
 
-if __name__ == '__main__':
-    # trace cannot be in Runner or Report because that would not trace the imports.
-    # Preliminary tray out.
-    # TODO
-    # 1. test
-    # 2. turn on/off
-    # 3. report coverage only for given test modules
-    # 4. figure out where to put this
-    # NB: sys.base_prefix is hard path while sys.prefix can be virtualized
-    #import trace
-    #t = trace.Trace(count=1, trace=0, ignoredirs=[sys.base_prefix, sys.base_exec_prefix, sys.prefix, sys.exec_prefix])
-    #t.runfunc(main)
-    main()
-    #t.results().write_results(summary=True)
-    exit(0)
 
 
 import inspect
@@ -1593,7 +1578,7 @@ if is_main_process:
 
     @test
     def import_submodule(stdout):
-        import sub_autotest.sub_module_ok
+        import autotest.tests.sub_module_ok
         m = stdout.getvalue()
         test.contains(m, "sub_module_ok")
         test.contains(m, "test_one")
@@ -1604,7 +1589,7 @@ if is_main_process:
         with test.stdout as s:
             @test(report=True) # force report, as might be suppressed in other context
             def import_submodule_is_silent_but_does_report_failures():
-                import sub_autotest.sub_module_fail
+                import autotest.tests.sub_module_fail
         test.fail("Should have failed.")
     except AssertionError as e:
         m = s.getvalue()
@@ -1692,31 +1677,35 @@ for fx in (tmp_path, stdout, stderr, raises):
 
 
 
-#@test
-def setup_correct():
-    sys.argv = ['', 'sdist']
+# @test
+def setup_correct(tmp_path):
+    sys.argv = ['', 'sdist', '--dist-dir', str(tmp_path)]
     from setup import setup, version
     from tarfile import open
-    tf = open(name=f'dist/autotest-{version}.tar.gz', mode='r:gz')
+    tf = open(name=tmp_path/f'autotest-{version}.tar.gz', mode='r:gz')
     test.eq([f'autotest-{version}',
              f'autotest-{version}/LICENSE',
              f'autotest-{version}/MANIFEST.in',
              f'autotest-{version}/PKG-INFO',
              f'autotest-{version}/README.rst',
+             f'autotest-{version}/autotest',
              f'autotest-{version}/autotest.egg-info',
              f'autotest-{version}/autotest.egg-info/PKG-INFO',
              f'autotest-{version}/autotest.egg-info/SOURCES.txt',
              f'autotest-{version}/autotest.egg-info/dependency_links.txt',
              f'autotest-{version}/autotest.egg-info/top_level.txt',
-             f'autotest-{version}/autotest.py',
+             f'autotest-{version}/autotest/__init__.py',
+             f'autotest-{version}/autotest/tests',
+             f'autotest-{version}/autotest/tests/__init__.py',
+             f'autotest-{version}/autotest/tests/sub_module_fail.py',
+             f'autotest-{version}/autotest/tests/sub_module_ok.py',
+             f'autotest-{version}/autotest/tests/temporary_class_namespace.py',
+             f'autotest-{version}/bin',
+             f'autotest-{version}/bin/autotest',
              f'autotest-{version}/setup.cfg',
              f'autotest-{version}/setup.py',
-             f'autotest-{version}/sub_autotest',
-             f'autotest-{version}/sub_autotest/__init__.py',
-             f'autotest-{version}/sub_autotest/sub_module_fail.py',
-             f'autotest-{version}/sub_autotest/sub_module_ok.py',
-             f'autotest-{version}/sub_autotest/temporary_class_namespace.py'],
-            tf.getnames(), msg=test.diff)
+            ],
+            sorted(tf.getnames()), msg=test.diff)
     tf.close()
 
 
