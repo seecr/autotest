@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 ## begin license ##
 #
 # "Autotest": a simpler test runner for python
@@ -1677,10 +1676,23 @@ for fx in (tmp_path, stdout, stderr, raises):
 
 
 
-# @test
+@test
 def setup_correct(tmp_path):
-    sys.argv = ['', 'sdist', '--dist-dir', str(tmp_path)]
-    from setup import setup, version
+    autotest_dev_dir = pathlib.Path(__file__).parent.resolve().parent
+    if not (autotest_dev_dir/'bin/autotest').exists():
+        # Not dev dir
+        return
+    import subprocess
+    version_process = subprocess.run(['python3', 'setup.py', '--version'],
+            capture_output=True,
+            text=True,
+            cwd=str(autotest_dev_dir),
+        )
+    version = version_process.stdout.strip()
+    result = subprocess.run(['python3', 'setup.py', 'sdist', '--dist-dir', str(tmp_path)],
+            capture_output=True,
+            cwd=str(autotest_dev_dir))
+
     from tarfile import open
     tf = open(name=tmp_path/f'autotest-{version}.tar.gz', mode='r:gz')
     test.eq([f'autotest-{version}',
