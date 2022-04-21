@@ -22,16 +22,15 @@
 #
 ## end license ##
 
+import pathlib
+mypath = pathlib.Path(__file__).parent.resolve()
 
 if __name__ == '__main__':
-    try:
-        from autotest import main
-    except ImportError:
-        # Not installed
-        import pathlib
-        mypath = pathlib.Path(__file__).parent.resolve()
+    if (mypath.parent/'autotest/__init__.py').exists():
         import sys
-        sys.path.append(str(mypath.parent))
+        sys.path.insert(0, str(mypath.parent))
+        from autotest import main
+    else:
         from autotest import main
     # trace cannot be in Runner or Report because that would not trace the imports.
     # Preliminary tray out.

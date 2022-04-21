@@ -1153,20 +1153,31 @@ def child():
 
 
 def import_syntax_error():
-    with test.tmp_path() as p:
-        import sys
+    with test.tmp_path as p:
         try:
             sys.path.append(str(p))
-            (p/'my_sub_module_syntax_error').write_text('syntax error')
+            (p/'my_sub_module_syntax_error.py').write_text('syntax error')
             import my_sub_module_syntax_error
         finally:
             sys.path.remove(str(p))
+
+
+def is_builtin(f):
+    if m := inspect.getmodule(f.f_code):
+        return m.__name__ in sys.builtin_module_names
 
 def is_internal(frame):
     nm = frame.f_code.co_filename
     return 'AUTOTEST_INTERNAL' in frame.f_code.co_varnames or \
            '<frozen importlib' in nm or \
-           '/usr/lib/python' in nm
+           is_builtin(frame)   # TODO testme
+
+@test
+def guess_module():
+    def f():
+        pass
+    test.eq('autotest', inspect.getmodule(f).__name__)
+    test.eq('autotest', inspect.getmodule(f.__code__).__name__)
 
 
 def bind_names(bindings, names, frame):
@@ -1597,12 +1608,14 @@ if is_main_process:
         test.contains(m, "sub_module_fail  \033[1mtest_one\033[0m")
 
 
-    try:
-        @test
-        def import_syntax_error(stderr):
-            spawn(import_syntax_error).join(3)
-    except SyntaxError as e:
-        pass
+    @test
+    def import_syntax_error_(stderr):
+        """ what does this test??? (Thijs weet het niet)"""
+        p = spawn(import_syntax_error)
+        p.join(1)
+        test.eq(1, p.exitcode)
+        test.contains(stderr.getvalue(), "SyntaxError")
+        test.contains(stderr.getvalue(), "syntax error")
 
 
     with test.opts(report=True):
