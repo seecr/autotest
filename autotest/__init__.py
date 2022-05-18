@@ -500,10 +500,13 @@ class WithFixtures:
         AUTOTEST_INTERNAL = 1
         def args(p):
             a = () if p.annotation == inspect.Parameter.empty else p.annotation
+            assert p.default == inspect.Parameter.empty, f"Use {p.name}:{p.default} instead of {p.name}={p.default}"
             return a if isinstance(a, tuple) else (a,)
         return [(self.context.fixtures[name], args(p)) for name, p in inspect.signature(f).parameters.items()
                 if name in self.context.fixtures and name not in except_for]
 
+
+    # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
     def run_recursively(self, f, contextmgrstack, *args, **kwds):
         AUTOTEST_INTERNAL = 1
@@ -515,7 +518,7 @@ class WithFixtures:
             fixture_values.append(contextmgrstack.enter_context(context_mgr))
         return f(*fixture_values, *args, **kwds)
 
-    # compare ^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v
+    # compare ^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v and test
 
     async def async_run_recursively(self, f, contextmgrstack, *args, **kwds):
         AUTOTEST_INTERNAL = 1
@@ -525,6 +528,8 @@ class WithFixtures:
             context_mgr = await self.async_run_recursively(ctxmgr_func, contextmgrstack, *fx_args)
             fixture_values.append(await contextmgrstack.enter_async_context(context_mgr))
         return f(*fixture_values, *args, **kwds)
+
+    # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
     async def async_run_with_fixtures(self, *args, **kwargs):
@@ -870,7 +875,6 @@ def combine(a, area:2, answer): yield a * area * answer
 @test
 def fixtures_with_combined_args(combine:3):
     test.eq(1587.6, combine)
-
 
 
 @test
@@ -1632,6 +1636,27 @@ if is_main_process:
                 tb = traceback.format_tb(e.__traceback__)
                 assert "await asyncio.sleep(1)" in tb[-1], tb[-1]
 
+
+    with test.raises(AssertionError, "Use combine:3 instead of combine=3"):
+        @test
+        def fixture_args_as_annotain_iso_defaul(combine=3):
+            """ fixture args are not default args: '=' instead of ':' raises error """
+            pass
+
+    @test.fixture
+    def async_combine(a):
+        yield a
+
+    with test.raises(AssertionError, "Use async_combine:3 instead of async_combine=3"):
+        @test
+        async def fixture_args_as_annotain_iso_defaul(async_combine=3):
+            """ fixture args are not default args: '=' instead of ':' raises error """
+            pass
+
+@test.fixture
+async def slow_callback_duration(s):
+    asyncio.get_running_loop().slow_callback_duration = s
+    yield
 
 
 #@test
