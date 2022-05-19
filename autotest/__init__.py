@@ -1020,6 +1020,7 @@ def capture(name):
     org_fd_backup = os.dup(org_fd)
     replacement = tempfile.TemporaryFile(mode="w+t", buffering=1)
     os.dup2(replacement.fileno(), org_fd)
+    setattr(sys, name, replacement)
     def getvalue():
         replacement.flush()
         replacement.seek(0)
@@ -1051,13 +1052,20 @@ if is_main_process:
     def stdout_capture():
         name = "Erik"
         msgs = []
+        sys_stdout = sys.stdout
+        sys_stderr = sys.stderr
+
         @test(report=False)
         def capture_all(stdout, stderr):
             print(f"Hello {name}!", file=sys.stdout)
             print(f"Bye {name}!", file=sys.stderr)
             msgs.extend([stdout.getvalue(), stderr.getvalue()])
+            test.ne(sys_stdout, sys.stdout)
+            test.ne(sys_stderr, sys.stderr)
         test.eq("Hello Erik!\n", msgs[0])
         test.eq("Bye Erik!\n", msgs[1])
+        test.eq(sys_stdout, sys.stdout)
+        test.eq(sys_stderr, sys.stderr)
 
 
 if is_main_process:
