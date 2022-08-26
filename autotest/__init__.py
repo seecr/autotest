@@ -1634,7 +1634,7 @@ if is_main_process:
     def import_syntax_error_(stderr):
         """ what does this test??? (Thijs weet het niet)"""
         p = spawn(import_syntax_error)
-        p.join(1)
+        p.join(5)
         test.eq(1, p.exitcode)
         test.contains(stderr.getvalue(), "SyntaxError")
         test.contains(stderr.getvalue(), "syntax error")
