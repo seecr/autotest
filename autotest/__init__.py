@@ -1730,6 +1730,7 @@ test.any = wildcard()
 def wildcard_matching():
     test.eq([test.any, 42], [16, 42])
     test.eq([test.any(lambda x: x in [1,2,3]), 78], [2, 78])
+    test.ne([test.any(lambda x: x in [1,2,3]), 78], [4, 78])
 
 
 
@@ -1771,7 +1772,7 @@ def setup_correct(tmp_path):
              f'autotest-{version}/autotest.egg-info/dependency_links.txt',
              f'autotest-{version}/autotest.egg-info/top_level.txt',
              f'autotest-{version}/autotest/__init__.py',
-             f'autotest-0.1.4/autotest/prrint.py',
+             f'autotest-{version}/autotest/prrint.py',
              f'autotest-{version}/autotest/tests',
              f'autotest-{version}/autotest/tests/__init__.py',
              f'autotest-{version}/autotest/tests/sub_module_fail.py',
