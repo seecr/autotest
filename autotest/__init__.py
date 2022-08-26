@@ -274,8 +274,18 @@ class Runner:
             lambda:
                 '\n' + '\n'.join(
                     difflib.ndiff(
-                        pprint.pformat(a, width=100000).splitlines(),
-                        pprint.pformat(b, width=100000).splitlines())))
+                        pprint.pformat(a).splitlines(),
+                        pprint.pformat(b).splitlines())))
+
+    def diff2(self, a, b):
+        import autotest.prrint as prrint
+        """ experimental """
+        return lazy_str(
+            lambda:
+                '\n' + '\n'.join(
+                    difflib.ndiff(
+                        prrint.format(a).splitlines(),
+                        prrint.format(b).splitlines())))
 
     class Operator:
         def __init__(self, test=bool):
@@ -1704,14 +1714,22 @@ def reporting_tests(stdout):
 
 
 class wildcard:
-    def __eq__(self, _):
-        return True
+    def __init__(self, f=lambda _: True):
+        self.f = f
+    def __eq__(self, x):
+        return self.f(x)
+    def __call__(self, f):
+        return wildcard(f)
+    def __repr__(self):
+        return self.f.__name__  + '(...)' if self.f else '*'
+
 test.any = wildcard()
 
 
 @test
 def wildcard_matching():
     test.eq([test.any, 42], [16, 42])
+    test.eq([test.any(lambda x: x in [1,2,3]), 78], [2, 78])
 
 
 
@@ -1753,6 +1771,7 @@ def setup_correct(tmp_path):
              f'autotest-{version}/autotest.egg-info/dependency_links.txt',
              f'autotest-{version}/autotest.egg-info/top_level.txt',
              f'autotest-{version}/autotest/__init__.py',
+             f'autotest-0.1.4/autotest/prrint.py',
              f'autotest-{version}/autotest/tests',
              f'autotest-{version}/autotest/tests/__init__.py',
              f'autotest-{version}/autotest/tests/sub_module_fail.py',
