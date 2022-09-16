@@ -51,7 +51,7 @@ def _format(data, indent, seen=None, sep=','):
         elif isinstance(data, dict):
             if data:
                 write('{')
-                for k, v in sorted(data.items()):
+                for k, v in sorted(data.items(), key=lambda item: str(item[0])):
                     _format(k, indent(), seen, sep=':')
                     _format(v, indent()(), seen)
                 write('}', sep)
@@ -68,7 +68,7 @@ def _format(data, indent, seen=None, sep=','):
         elif isinstance(data, set):
             if data:
                 write('{')
-                for v in sorted(data):
+                for v in sorted(data, key=str):
                     _format(v, indent(), seen)
                 write('}', sep)
             else:
@@ -176,6 +176,12 @@ def set_sorted():
 
 
 @test
+def set_sorted_uncomparables():
+    x = format({str, dict, bool})
+    test.eq("{\n  <class 'bool'>,\n  <class 'dict'>,\n  <class 'str'>,\n}\n", x)
+
+
+@test
 def dict_sorted():
     x = format({"noot": 3, "mies": 2, "aap": 1})
     test.eq("""{
@@ -187,6 +193,13 @@ def dict_sorted():
     3,
 }
 """, x)
+
+
+@test
+def dict_sorted_uncomparables():
+    x = format({str: 2, dict: 1, bool: 3})
+    test.eq("{\n  <class 'bool'>:\n    3,\n  <class 'dict'>:\n    1,\n  <class 'str'>:\n    2,\n}\n", x)
+
 
 @test
 def beetje_echt():
@@ -259,3 +272,23 @@ def via_stdout(stdout):
     f = format(d)
     prrint(d)
     test.eq(f, stdout.getvalue())
+
+
+def nndiff(a, b):
+    import difflib
+    import re
+    r = re.compile("(\s*)(\S+)(\s*)")
+    al = [r.fullmatch(l).group(1,2,3) for l in a]
+    bl = [r.fullmatch(l).group(1,2,3) for l in b]
+    dl = difflib.ndiff([l[1] for l in al], [l[1] for l in bl])
+    return dl
+
+
+@test
+def diff2_whitespace():
+    a = [" a "]
+    b = ["  a "]
+    d = nndiff(a, b)
+    test.eq('  a', ''.join(d))
+
+

@@ -24,6 +24,7 @@
 
 
 # TODO
+# 1. detect running async loop and use that one iso a new one
 # 2. if no args, find and run all modules from current dir, but recursively
 # 3. run ALL test, including depedencies (so handy, reenable this functionality)
 # 4. old behaviour (skip dependencies) via argument??
@@ -34,6 +35,7 @@ import sys
 
 
 def post_mortem(tb, *cmds):
+    """ for when you use plain assert, it'll throw you in Pdb on failure """
     p = pdb.Pdb()
     p.rcLines.extend(cmds)
     p.reset()
@@ -83,11 +85,11 @@ def main():
         modules = (pathlib.Path(p).stem for p in cwd.iterdir())
     modules = [m for m in modules if m not in ['__init__', '__pycache__'] and not m.startswith('.')]
 
-    if 'autotest' not in modules:
-        os.environ['AUTOTEST_report'] = 'False'
-        print("silently", end=' ')
+    #if 'autotest' not in modules:
+    #    os.environ['AUTOTEST_report'] = 'False'
+    #    print("silently", end=' ')
 
-    print("importing \033[1mautotest\033[0m")
+    #print("importing \033[1mautotest\033[0m")
     from autotest import test, filter_traceback # default test runner
     insert_excepthook(lambda t, v, tb: (t, v, filter_traceback(tb)))
 
@@ -104,6 +106,8 @@ def main():
                 elif importlib.util.find_spec(name):
                     print(f"importing tests from \033[1m{name}\033[0m")
                     importlib.import_module(name)
+                else:
+                    print(f"WARNING: module \033[1m{name}\033[0m not found.")
 
         report = test.context.report
         print(f"Found \033[1m{report.total}\033[0m unique tests, ran \033[1m{report.ran}\033[0m, reported \033[1m{report.reported}\033[0m.")
@@ -144,7 +148,9 @@ sys_defaults = {
     'timeout' : 2,          # asyncio task timeout
     'coverage': False,      # invoke trace module
     'debug'   : True,       # use debug for asyncio.run
+    'diff'    : None,       # set a function for printing diffs on failures
 }
+
 
 sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
@@ -277,21 +283,34 @@ class Runner:
                         pprint.pformat(a).splitlines(),
                         pprint.pformat(b).splitlines())))
 
-    def diff2(self, a, b):
-        import autotest.prrint as prrint
-        """ experimental """
-        return lazy_str(
-            lambda:
-                '\n' + '\n'.join(
+
+    @staticmethod
+    def diff2(a, b):
+        """ experimental, own formatting more suitable for difflib """
+        import autotest.prrint as prrint # late import so prrint can use autotest itself
+        return '\n' + '\n'.join(
                     difflib.ndiff(
                         prrint.format(a).splitlines(),
-                        prrint.format(b).splitlines())))
+                        prrint.format(b).splitlines()))
+
+    def prrint(self, a):
+        import autotest.prrint as prrint # late import so prrint can use autotest itself
+        prrint.prrint(a)
 
     class Operator:
-        def __init__(self, test=bool):
+        """ Returns an function that:
+            calls an operator from builtin module operator, eg:
+              - test.eq(1,1), test.ne(1,2), etc.
+            or calls a method of the first arg, passing it the rest of the args:
+              - test.startswith("aap", "a")
+            and calls given function (default bool()) on the result
+        """
+        def __init__(self, test=bool, diff=None):
             self.test = test
+            self.diff = diff
         def __getattr__(self, opname):
-            def call_operator(*args, msg=None):
+            def call_operator(*args, diff=None, msg=None):
+                diff = diff or msg
                 AUTOTEST_INTERNAL = 1
                 try:
                     op = getattr(operator, opname)
@@ -300,8 +319,8 @@ class Runner:
                     op = getattr(args[0], opname)
                     actual_args = args[1:]
                 if not self.test(op(*actual_args)):
-                    if msg:
-                        raise AssertionError(msg(*args))
+                    if diff := diff or self.diff:
+                        raise AssertionError(diff(*args))
                     else:
                         raise AssertionError(op.__name__, *args)
                 return True
@@ -309,14 +328,14 @@ class Runner:
 
     @property
     def comp(self):
-        return self.Operator(test=operator.not_)
+        return self.Operator(test=operator.not_, diff=self.context.opts.get('diff'))
 
     complement = comp
 
 
     def __getattr__(self, name):
-        """ run.eq(lhs, rhs) etc, any operator from module 'operator' really.
-            or it returns a context manager if name denotes a fixture. """
+        """ - test.<fixture>: returns a fixture
+            - otherwise delegates to Operator() """
         if name in self.context.fixtures:
             fx = self.context.fixtures[name]
             fx_bound = WithFixtures(self.context, fx)
@@ -325,7 +344,7 @@ class Runner:
             if inspect.isasyncgenfunction(fx):
                 return ArgsCollectingAsyncContextManager(fx_bound)
             raise ValueError(f"not an (async) generator: {fx}")
-        return getattr(self.Operator(), name)
+        return getattr(self.Operator(diff=self.context.opts.get('diff')), name)
 
 
 test = Runner() # default Runner
@@ -499,6 +518,7 @@ class WithFixtures:
     def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         if inspect.iscoroutinefunction(self.func):
+            # TODO detect already running loop and use it
             return asyncio.run(self.async_run_with_fixtures(*args, **kwds), debug=self.context.opts.get('debug'))
         with contextlib.ExitStack() as contextmgrstack:
             # we could use the timeout here too, with a signal handler TODO
@@ -634,6 +654,19 @@ class lifetime:
     def fixtures_livetime():
         assert ['A-live', 'B-live', 'C-live', 'C-close', 'B-close', 'A-close'] == fixture_lifetime, fixture_lifetime
 
+class async_tests:
+    done = [False]
+
+    #@test
+    async def this_is_an_async_test():
+        async_tests.done[0] = True
+
+    #try:
+    #    asynio.get_running_loop()
+    #except RuntimeError:
+    #    loop = asynio.new_event_loop()
+
+    #test.truth(all(done))
 
 class async_fixtures:
 
@@ -1106,14 +1139,9 @@ def raises(exception=Exception, message=None):
         yield
     except exception as e:
         if message and message != str(e):
-            e = AssertionError(f"should raise {exception.__name__} with message '{message}'")
-            e.__suppress_context__ = True
-            raise e
+            raise AssertionError(f"should raise {exception.__name__} with message '{message}'") from e
     except BaseException as e:
-        tb = e.__traceback__
-        e = AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}")
-        e.__suppress_context__ = True
-        raise e.with_traceback(tb)
+        raise AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}").with_traceback(e.__traceback__) from e
     else:
         e = AssertionError(f"should raise {exception.__name__}")
         e.__suppress_context__ = True
@@ -1410,6 +1438,22 @@ def idea_for_dumb_diffs():
         test.eq(a, b, msg=set.symmetric_difference)
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
+
+@test
+def diff2_sorting_including_uncomparables():
+    msg = """
+  {
++   1,
+-   <class 'dict'>:
+?           ^^^   ^
+
++   <class 'str'>,
+?           ^ +  ^
+
+-     <class 'bool'>,
+  }"""
+    with test.raises(AssertionError, msg):
+        test.eq({dict: bool}, {str, 1}, msg=test.diff2)
 
 
 @test
@@ -1713,11 +1757,14 @@ def reporting_tests(stdout):
     test.contains(m, "autotest  \033[1mtest_with_reporting_and_failure_raised\033[0m")
 
 
+def any(_): # name is included in diffs
+    return True
+
 class wildcard:
-    def __init__(self, f=lambda _: True):
+    def __init__(self, f=any):
         self.f = f
     def __eq__(self, x):
-        return self.f(x)
+        return bool(self.f(x))
     def __call__(self, f):
         return wildcard(f)
     def __repr__(self):
@@ -1795,3 +1842,4 @@ def mock_object(*functions, **more):
     self = mock.Mock()
     self.configure_mock(**{f.__name__: types.MethodType(f, self) for f in functions}, **more)
     return self
+
