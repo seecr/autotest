@@ -93,26 +93,24 @@ def main():
     from autotest import test, filter_traceback # default test runner
     insert_excepthook(lambda t, v, tb: (t, v, filter_traceback(tb)))
 
-    with test.opts(skip=lambda f: not any(f.__module__.startswith(m) for m in modules), report=True):
+    def skip_fn(test_fn):
+        return not all(test_fn.__module__.startswith(m) for m in modules)
+    with test.opts(skip=skip_fn, report=True):
         if 'autotest' in modules:
             modules.remove('autotest')
 
-        for qname in modules:
-            names = qname.split('.')
-            for l in range(len(names)):
-                name = '.'.join(names[:l+1])
-                if name in sys.modules:
-                    print(f"already imported tests from \033[1m{name}\033[0m")
-                elif importlib.util.find_spec(name):
-                    print(f"importing tests from \033[1m{name}\033[0m")
-                    importlib.import_module(name)
-                else:
-                    print(f"WARNING: module \033[1m{name}\033[0m not found.")
+        for name in modules:
+            if name in sys.modules:
+                print(f"already imported tests from \033[1m{name}\033[0m")
+            elif importlib.util.find_spec(name):
+                print(f"importing tests from \033[1m{name}\033[0m")
+                importlib.import_module(name)
+            else:
+                print(f"WARNING: module \033[1m{name}\033[0m not found.")
 
         report = test.context.report
         print(f"Found \033[1m{report.total}\033[0m unique tests, ran \033[1m{report.ran}\033[0m, reported \033[1m{report.reported}\033[0m.")
         report.report()
-
 
 
 
