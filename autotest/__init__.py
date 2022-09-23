@@ -295,6 +295,10 @@ class Runner:
         import autotest.prrint as prrint # late import so prrint can use autotest itself
         prrint.prrint(a)
 
+    def isinstance(self, value, types):
+        types_str = f"{[t.__name__ for t in types]}" if isinstance(types, tuple) else f"{types.__name__!r}"
+        test.truth(isinstance(value, types), msg=f"{type(value).__name__!r} is not an instance of {types_str}".format)
+
     class Operator:
         """ Returns an function that:
             calls an operator from builtin module operator, eg:
@@ -1634,6 +1638,16 @@ def trace_backfiltering():
             test.eq(1, 2)
     except AssertionError:
         test_names('trace_backfiltering', 'test_for_real_with_Runner_involved')
+
+
+@test
+def test_isinstance():
+    test.isinstance(1, int)
+    test.isinstance(1.1, (int, float))
+    with test.raises(AssertionError, "'int' is not an instance of 'str'"):
+        test.isinstance(1, str)
+    with test.raises(AssertionError, "'int' is not an instance of ['str', 'dict']"):
+        test.isinstance(1, (str, dict))
 
 
 if is_main_process:
