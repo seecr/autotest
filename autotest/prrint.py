@@ -104,7 +104,10 @@ def prrint(data):
     _format(data, Indenter(sys.stdout), seen=set(), sep='')
 
 
-from autotest import test
+#from autotest import test
+from .tester import Runner, stdout
+test = Runner()
+test.fixture(stdout)
 
 @test
 def empty():
