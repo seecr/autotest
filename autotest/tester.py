@@ -25,6 +25,7 @@ import os
 import difflib
 import collections
 import pprint
+import builtins
 import unittest.mock as mock
 
 
@@ -50,7 +51,7 @@ class Report:
             self.done(self)
 
     def start(self, test):
-        if test.runner._opts.get('report'):
+        if test.runner.options.get('report'):
             print(test, flush=True)
             self.reported += 1
 
@@ -79,14 +80,14 @@ defaults = dict(
 class Runner:
     """ Main tool for running tests across modules and programs. """
 
-    def __init__(self, parent=None, reporter=None, fixtures=None, gathered=None, **opts):
+    def __init__(self, parent=None, reporter=None, gathered=None, **opts):
         self.report = reporter if reporter else Report()
         if parent:
             self.fixtures = parent.fixtures.new_child()
-            self._opts = parent._opts.new_child(m=opts)
+            self.options = parent.options.new_child(m=opts)
         else:
             self.fixtures = collections.ChainMap()
-            self._opts = collections.ChainMap(opts, defaults)
+            self.options = collections.ChainMap(opts, defaults)
         self.gathered = gathered if gathered else []
 
     def clone(self, opts, gathered=None):
@@ -98,12 +99,12 @@ class Runner:
         AUTOTEST_INTERNAL = 1
         self.report.found(self)
         bind_func = bind_1_frame_back(test_func)
-        skip = self._opts.get('skip')
+        skip = self.options.get('skip')
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             self.report(WithFixtures(self, bind_func), *app_args, **app_kwds)
-        if self._opts.get('gather'):
+        if self.options.get('gather'):
             self.gathered.append(bind_func)
-        return bind_func if self._opts.get('keep') else None
+        return bind_func if self.options.get('keep') else None
 
 
     def __call__(self, *fs, **opts):
@@ -137,7 +138,7 @@ class Runner:
 
 
     def fail(self, *args, **kwds):
-        if not self._opts.get('skip', False):
+        if not self.options.get('skip', False):
             args += (kwds,) if kwds else ()
             raise AssertionError(*args)
 
@@ -153,12 +154,10 @@ class Runner:
 
     def diff(self, a, b):
         """ When str called, produces diff of textual representation of a and b. """
-        return lazy_str(
-            lambda:
-                '\n' + '\n'.join(
+        return '\n' + '\n'.join(
                     difflib.ndiff(
                         pprint.pformat(a).splitlines(),
-                        pprint.pformat(b).splitlines())))
+                        pprint.pformat(b).splitlines()))
 
 
     @staticmethod
@@ -174,9 +173,6 @@ class Runner:
         import autotest.prrint as prrint # late import so prrint can use autotest itself
         prrint.prrint(a)
 
-    def isinstance(self, value, types):
-        types_str = f"{[t.__name__ for t in types]}" if isinstance(types, tuple) else f"{types.__name__!r}"
-        self.truth(isinstance(value, types), msg=f"{type(value).__name__!r} is not an instance of {types_str}".format)
 
     class Operator:
         """ Returns an function that:
@@ -197,8 +193,12 @@ class Runner:
                     op = getattr(operator, opname)
                     actual_args = args
                 except AttributeError:
-                    op = getattr(args[0], opname)
-                    actual_args = args[1:]
+                    try:
+                        op = getattr(builtins, opname)
+                        actual_args = args
+                    except AttributeError:
+                        op = getattr(args[0], opname)
+                        actual_args = args[1:]
                 if not self.test(op(*actual_args)):
                     if diff := diff or self.diff:
                         raise AssertionError(diff(*args))
@@ -209,7 +209,7 @@ class Runner:
 
     @property
     def comp(self):
-        return self.Operator(test=operator.not_, diff=self._opts.get('diff'))
+        return self.Operator(test=operator.not_, diff=self.options.get('diff'))
 
     complement = comp
 
@@ -225,15 +225,13 @@ class Runner:
             if inspect.isasyncgenfunction(fx):
                 return ArgsCollectingAsyncContextManager(fx_bound)
             raise ValueError(f"not an (async) generator: {fx}")
-        return getattr(self.Operator(diff=self._opts.get('diff')), name)
+        return getattr(self.Operator(diff=self.options.get('diff')), name)
 
 
-self_test = Runner()
+self_test = Runner() # separate runner for bootstrapping/self testing
 
 
 def iterate(f, v):
-    #if isinstance(f, str):
-    #    f = operator.attrgetter(f)
     while v:
         yield v
         v = f(v)
@@ -264,12 +262,6 @@ ArgsCollectingContextManager = contextlib.contextmanager
 def bind_1_frame_back(_func_):
     return _func_
 
-
-class lazy_str:
-    def __init__(self, f):
-        self._f = f
-    def __str__(self):
-        return self._f()
 
 
 trace = []
@@ -399,11 +391,25 @@ class WithFixtures:
     def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         if inspect.iscoroutinefunction(self.func):
-            # TODO detect already running loop and use it
-            return asyncio.run(self.async_run_with_fixtures(*args, **kwds), debug=self.runner._opts.get('debug'))
-        with contextlib.ExitStack() as contextmgrstack:
-            # we could use the timeout here too, with a signal handler TODO
-            return self.run_recursively(self.func, contextmgrstack, *args, **kwds)
+            coro = self.async_run_with_fixtures(*args, **kwds)
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(coro, debug=self.runner.options.get('debug'))
+            else:
+                """ we get called by sync code (a decorator during def) which in turn
+                    is called from async code. The only way to run this async test
+                    is in a new event loop (in anothr thread) """
+                import threading
+                t = threading.Thread(target=asyncio.run, args=(coro,),
+                        kwargs={'debug': self.runner.options.get('debug')})
+                t.start()
+                t.join()
+                return
+        else:
+            with contextlib.ExitStack() as contextmgrstack:
+                # we could use the timeout here too, with a signal handler TODO
+                return self.run_recursively(self.func, contextmgrstack, *args, **kwds)
 
 
     def get_fixtures_except_for(self, f, except_for):
@@ -445,7 +451,7 @@ class WithFixtures:
 
     async def async_run_with_fixtures(self, *args, **kwargs):
         AUTOTEST_INTERNAL = 1
-        timeout = self.runner._opts.get('timeout')
+        timeout = self.runner.options.get('timeout')
         async with contextlib.AsyncExitStack() as contextmgrstack:
             result = await self.async_run_recursively(self.func, contextmgrstack, *args, **kwargs)
             assert inspect.iscoroutine(result)
@@ -535,19 +541,6 @@ class lifetime:
     def fixtures_livetime():
         assert ['A-live', 'B-live', 'C-live', 'C-close', 'B-close', 'A-close'] == fixture_lifetime, fixture_lifetime
 
-class async_tests:
-    done = [False]
-
-    #@self_test
-    async def this_is_an_async_test():
-        async_tests.done[0] = True
-
-    #try:
-    #    asynio.get_running_loop()
-    #except RuntimeError:
-    #    loop = asynio.new_event_loop()
-
-    #self_test.truth(all(done))
 
 class async_fixtures:
 
@@ -711,11 +704,11 @@ def test_testop_has_args():
 with self_test.opts(report=False) as tst:
     @tst
     def nested_defaults():
-        dflts0 = tst._opts
+        dflts0 = tst.options
         assert not dflts0['skip']
         assert not dflts0['report']
         with tst.opts(skip=True, report=True) as tstk:
-            dflts1 = tstk._opts
+            dflts1 = tstk.options
             assert dflts1['skip']
             assert dflts1['report']
             @tstk
@@ -723,27 +716,27 @@ with self_test.opts(report=False) as tst:
                 tstk.eq(1, 2)
             try:
                 with tstk.opts(skip=False, report=False) as TeSt:
-                    dflts2 = TeSt._opts
+                    dflts2 = TeSt.options
                     assert not dflts2['skip']
                     assert not dflts2['report']
                     @TeSt
                     def fails_but_is_not_reported():
                         TeSt.gt(1, 2)
                     tst.fail()
-                assert tstk._opts == dflts1
+                assert tstk.options == dflts1
             except AssertionError as e:
                 tstk.eq("('gt', 1, 2)", str(e))
-        assert tst._opts == dflts0
+        assert tst.options == dflts0
 
     @tst
-    def shorthand_for_new_context_without_opts():
+    def shorthand_for_new_context_without_options():
         """ Use this for defining new/tmp fixtures. """
         ctx0 = tst
         with tst() as t: # == self_test.opts()
             assert ctx0 != t
             assert ctx0.fixtures == t.fixtures
             assert ctx0.report == t.report
-            assert ctx0._opts == t._opts
+            assert ctx0.options == t.options
             @t.fixture
             def new_one():
                 yield 42
@@ -804,9 +797,9 @@ def combine_test_with_options():
     trace = []
     @self_test(keep=True, my_opt=42)
     def f0():
-        trace.append(self_test._opts.get('my_opt'))
+        trace.append(self_test.options.get('my_opt'))
     def f1(): # ordinary function; the only difference, here(!) is binding
-        trace.append(self_test._opts.get('my_opt'))
+        trace.append(self_test.options.get('my_opt'))
     self_test(f0)
     self_test(f0, my_opt=76)
     self_test(f0, f1, my_opt=93)
@@ -1215,12 +1208,12 @@ assert not p.exists()
 @self_test
 def idea_for_dumb_diffs():
     # if you want a so called smart diff: the second arg of assert is meant for it.
-    # Runner supplies a generic (lazy) diff between two pretty printed values
+    # Runner supplies a generic diff between two pretty printed values
     a = [7, 1, 2, 8, 3, 4]
     b = [1, 2, 9, 3, 4, 6]
     d = self_test.diff(a, b)
-    assert str != type(d)
-    assert callable(d.__str__)
+    #assert str != type(d)           # no longer lazy_str
+    #assert callable(d.__str__)
     assert str == type(str(d))
 
     try:
@@ -1470,10 +1463,24 @@ def trace_backfiltering():
 def test_isinstance():
     self_test.isinstance(1, int)
     self_test.isinstance(1.1, (int, float))
-    with self_test.raises(AssertionError, "'int' is not an instance of 'str'"):
+    with self_test.raises(AssertionError, "('isinstance', 1, <class 'str'>)"):
         self_test.isinstance(1, str)
-    with self_test.raises(AssertionError, "'int' is not an instance of ['str', 'dict']"):
+    with self_test.raises(AssertionError, "('isinstance', 1, (<class 'str'>, <class 'dict'>))"):
         self_test.isinstance(1, (str, dict))
+
+
+@self_test
+def use_builtin():
+    """ you could use any builtin as well; there are not that much useful options in module builtins though
+        we could change the priority of lookups, now it is: operator, builtins, <arg[0]>. Maybe reverse? """
+    self_test.all([1,2,3])
+    with self_test.raises(AssertionError):
+        self_test.all([False,2,3])
+    class A: pass
+    class B(A): pass
+    self_test.issubclass(B, A)
+    self_test.hasattr([], 'append')
+
 
 
 
@@ -1481,11 +1488,6 @@ def test_isinstance():
 async def slow_callback_duration(s):
     asyncio.get_running_loop().slow_callback_duration = s
     yield
-
-
-#@self_test
-def probeer():
-    assert False
 
 
 def any(_): # name is included in diffs
@@ -1509,3 +1511,22 @@ def wildcard_matching():
     self_test.eq([self_test.any, 42], [16, 42])
     self_test.eq([self_test.any(lambda x: x in [1,2,3]), 78], [2, 78])
     self_test.ne([self_test.any(lambda x: x in [1,2,3]), 78], [4, 78])
+
+
+class nexted_async_tests:
+    done = [False, False, False]
+
+    @self_test
+    async def this_is_an_async_test():
+        done[0] = True
+        """ A decorator is always called synchronously, so it can't call the async test
+            because an event loop is already running. Solution is to start a new loop."""
+        @self_test
+        async def this_is_a_nested_async_test():
+            done[1] = True
+            @self_test
+            async def this_is_a_doubly_nested_async_test():
+                done[2] = True
+
+    self_test.all(done)
+
