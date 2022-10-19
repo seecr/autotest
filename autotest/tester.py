@@ -23,6 +23,7 @@ import functools
 import asyncio
 import os
 import difflib
+import collections
 import pprint
 import unittest.mock as mock
 
@@ -64,11 +65,7 @@ class Report:
 
 
 
-class Runner:
-    """ Main tool for running tests across modules and programs. """
-
-    def __init__(self, reporter=None, fixtures=None, gathered=None,
-            # built-in defaults for options
+defaults = dict(
             skip    = not is_main_process or __name__ == '__mp_main__',
             keep    = False,      # Ditch test functions after running, or keep them in their namespace.
             report  = True,       # Do reporting when starting a test.
@@ -77,16 +74,24 @@ class Runner:
             coverage= False,      # invoke trace module
             debug   = True,       # use debug for asyncio.run
             diff    = None,       # set a function for printing diffs on failures
-            ):
+        )
+
+class Runner:
+    """ Main tool for running tests across modules and programs. """
+
+    def __init__(self, parent=None, reporter=None, fixtures=None, gathered=None, **opts):
         self.report = reporter if reporter else Report()
-        self.fixtures = fixtures.copy() if fixtures else {}
+        if parent:
+            self.fixtures = parent.fixtures.new_child()
+            self._opts = parent._opts.new_child(m=opts)
+        else:
+            self.fixtures = collections.ChainMap()
+            self._opts = collections.ChainMap(opts, defaults)
         self.gathered = gathered if gathered else []
-        self._opts = dict(skip=skip, keep=keep, report=report, gather=gather,
-                timeout=timeout, coverage=coverage, debug=debug, diff=diff)
 
     def clone(self, opts, gathered=None):
-        return Runner(reporter=self.report, fixtures=self.fixtures,
-                gathered=self.gathered if gathered is None else gathered, **(self._opts | opts))
+        return Runner(parent=self, reporter=self.report, 
+                gathered=self.gathered if gathered is None else gathered, **opts)
 
     def run(self, test_func, *app_args, **app_kwds):
         """ Binds f to stack vars and fixtures and runs it immediately. """
