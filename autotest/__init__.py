@@ -51,6 +51,10 @@
 """
 
 
+sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
+
+
+
 from tester import Runner, tmp_path
 test = Runner()
 test.fixture(tmp_path)

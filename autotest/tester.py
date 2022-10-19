@@ -1,5 +1,15 @@
 
-""" Defines the Runner """
+""" Defines the Runner 
+
+    NB: a stand alone Runner (self_test) is created as to not interfere with
+        the system wide default runner, which may not exists as long as we
+        are bootstrapping.
+
+    NB: Runner is tested using Runner itself. Runner is bootstrapped in steps,i
+        starting with a simple Runner of which the capabilities are gradually
+        extended.
+
+"""
 
 import inspect
 import traceback
@@ -19,22 +29,8 @@ import unittest.mock as mock
 
 from utils import is_main_process
 
+
 __all__ = ['test', 'Runner']
-
-
-sys_defaults = {
-    'skip'    : not is_main_process or __name__ == '__mp_main__',
-    'keep'    : False,      # Ditch test functions after running, or keep them in their namespace.
-    'report'  : True,       # Do reporting when starting a test.
-    'gather'  : False,      # Gather tests, use gathered() to get them
-    'timeout' : 2,          # asyncio task timeout
-    'coverage': False,      # invoke trace module
-    'debug'   : True,       # use debug for asyncio.run
-    'diff'    : None,       # set a function for printing diffs on failures
-}
-
-
-sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
 
 class Report:
@@ -71,13 +67,22 @@ class Report:
 class Runner:
     """ Main tool for running tests across modules and programs. """
 
-    #def __init__(self, **opts):
-    def __init__(self, reporter=None, fixtures=None, gathered=None, **opts):
-        #self._context = [TestContext(Report(), {}, [], sys_defaults | opts)]
+    def __init__(self, reporter=None, fixtures=None, gathered=None,
+            # built-in defaults for options
+            skip    = not is_main_process or __name__ == '__mp_main__',
+            keep    = False,      # Ditch test functions after running, or keep them in their namespace.
+            report  = True,       # Do reporting when starting a test.
+            gather  = False,      # Gather tests, use gathered() to get them
+            timeout = 2,          # asyncio task timeout
+            coverage= False,      # invoke trace module
+            debug   = True,       # use debug for asyncio.run
+            diff    = None,       # set a function for printing diffs on failures
+            ):
         self.report = reporter if reporter else Report()
         self.fixtures = fixtures.copy() if fixtures else {}
         self.gathered = gathered if gathered else []
-        self._opts = sys_defaults | opts
+        self._opts = dict(skip=skip, keep=keep, report=report, gather=gather,
+                timeout=timeout, coverage=coverage, debug=debug, diff=diff)
 
     def clone(self, opts, gathered=None):
         return Runner(reporter=self.report, fixtures=self.fixtures,
@@ -94,11 +99,6 @@ class Runner:
         if self._opts.get('gather'):
             self.gathered.append(bind_func)
         return bind_func if self._opts.get('keep') else None
-
-
-    #@property
-    #def context(self):
-    #    return self._context[-1]
 
 
     def __call__(self, *fs, **opts):
@@ -122,17 +122,12 @@ class Runner:
 
     @contextlib.contextmanager
     def opts(self, gathered=None, **opts):
-        """ Set default options for next tests."""
-        #self._context.append(self.context.clone(opts, gathered=gathered))
-        child = self.clone(opts, gathered=gathered)
-        try:
-            yield child
-        finally:
-            pass
-            #self._context.pop()
+        """ create sub tester with opts """
+        yield self.clone(opts, gathered=gathered)
 
 
     def gather(self, gather=True, **opts):
+        """ create sub tester which gathers tests with opts """
         return self.opts(gathered=[], gather=gather, **opts)
 
 
@@ -176,7 +171,7 @@ class Runner:
 
     def isinstance(self, value, types):
         types_str = f"{[t.__name__ for t in types]}" if isinstance(types, tuple) else f"{types.__name__!r}"
-        test.truth(isinstance(value, types), msg=f"{type(value).__name__!r} is not an instance of {types_str}".format)
+        self.truth(isinstance(value, types), msg=f"{type(value).__name__!r} is not an instance of {types_str}".format)
 
     class Operator:
         """ Returns an function that:
@@ -228,12 +223,12 @@ class Runner:
         return getattr(self.Operator(diff=self._opts.get('diff')), name)
 
 
-test = Runner() # default Runner
+self_test = Runner()
 
 
 def iterate(f, v):
-    if isinstance(f, str):
-        f = operator.attrgetter(f)
+    #if isinstance(f, str):
+    #    f = operator.attrgetter(f)
     while v:
         yield v
         v = f(v)
@@ -284,7 +279,7 @@ class any_number:
         return isinstance(rhs, Number) and self._lo <= rhs <= self._hi
 
 
-@test
+@self_test
 def example_test():
     assert any_number(1,10) == 1
     assert any_number(1,10) == 2
@@ -338,7 +333,7 @@ class ArgsCollectingAsyncContextManager(ArgsCollector, AsyncContextManagerType):
         raise Exception(f"Use 'async with' for {self.func}.")
 
 
-@test
+@self_test
 def extra_args_supplying_contextmanager():
     def f(a, b, c, *, d, e, f):
         yield a, b, c, d, e, f
@@ -462,14 +457,14 @@ class WithFixtures:
                 raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
 
 
-@test.fixture
+@self_test.fixture
 def fx_a():
     trace.append("A start")
     yield 67
     trace.append("A end")
 
 
-@test.fixture
+@self_test.fixture
 def fx_b(fx_a):
     trace.append("B start")
     yield 74
@@ -483,41 +478,41 @@ def test_a(fx_a, fx_b, a, b=10):
     assert 11 == b
     trace.append("test_a done")
 
-@test
+@self_test
 def test_run_with_fixtures():
-    WithFixtures(test, test_a)(9, b=11)
+    WithFixtures(self_test, test_a)(9, b=11)
     assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
 
 
 fixture_lifetime = []
 
-@test.fixture
+@self_test.fixture
 def fixture_A():
     fixture_lifetime.append('A-live')
     yield 42
     fixture_lifetime.append('A-close')
 
 
-@test
+@self_test
 def with_one_fixture(fixture_A):
     assert 42 == fixture_A, fixture_A
 
 
-@test.fixture
+@self_test.fixture
 def fixture_B(fixture_A):
     fixture_lifetime.append('B-live')
     yield fixture_A * 2
     fixture_lifetime.append('B-close')
 
 
-@test.fixture
+@self_test.fixture
 def fixture_C(fixture_B):
     fixture_lifetime.append('C-live')
     yield fixture_B * 3
     fixture_lifetime.append('C-close')
 
 
-@test
+@self_test
 def nested_fixture(fixture_B):
     assert 84 == fixture_B, fixture_B
 
@@ -526,19 +521,19 @@ class lifetime:
 
     del fixture_lifetime[:]
 
-    @test
+    @self_test
     def more_nested_fixtures(fixture_C):
         assert 252 == fixture_C, fixture_C
         assert ['A-live', 'B-live', 'C-live'] == fixture_lifetime, fixture_lifetime
 
-    @test
+    @self_test
     def fixtures_livetime():
         assert ['A-live', 'B-live', 'C-live', 'C-close', 'B-close', 'A-close'] == fixture_lifetime, fixture_lifetime
 
 class async_tests:
     done = [False]
 
-    #@test
+    #@self_test
     async def this_is_an_async_test():
         async_tests.done[0] = True
 
@@ -547,58 +542,56 @@ class async_tests:
     #except RuntimeError:
     #    loop = asynio.new_event_loop()
 
-    #test.truth(all(done))
+    #self_test.truth(all(done))
 
 class async_fixtures:
 
-    @test.fixture
+    @self_test.fixture
     async def my_async_fixture():
         await asyncio.sleep(0)
         yield 'async-42'
 
 
-    @test
+    @self_test
     async def async_fixture_with_async_with():
-        async with test.my_async_fixture as f:
+        async with self_test.my_async_fixture as f:
             assert 'async-42' == f
         try:
-            with test.my_async_fixture:
+            with self_test.my_async_fixture:
                 assert False
         except Exception as e:
-            test.startswith(str(e), "Use 'async with' for ")
+            self_test.startswith(str(e), "Use 'async with' for ")
 
 
-    @test
+    @self_test
     async def async_fixture_as_arg(my_async_fixture):
-        test.eq('async-42', my_async_fixture)
+        self_test.eq('async-42', my_async_fixture)
 
 
     try:
-        @test
+        @self_test
         def only_async_funcs_can_have_async_fixtures(my_async_fixture):
             assert False, "not possible"
     except AssertionError as e:
-        test.eq(f"function 'only_async_funcs_can_have_async_fixtures' cannot have async fixture 'my_async_fixture'.", str(e))
+        self_test.eq(f"function 'only_async_funcs_can_have_async_fixtures' cannot have async fixture 'my_async_fixture'.", str(e))
 
 
-    @test.fixture
+    @self_test.fixture
     async def with_nested_async_fixture(my_async_fixture):
         yield f">>>{my_async_fixture}<<<"
 
 
-    @test
+    @self_test
     async def async_test_with_nested_async_fixtures(with_nested_async_fixture):
-        test.eq(">>>async-42<<<", with_nested_async_fixture)
+        self_test.eq(">>>async-42<<<", with_nested_async_fixture)
 
 
-    @test
+    @self_test
     async def mix_async_and_sync_fixtures(fixture_C, with_nested_async_fixture):
-        test.eq(">>>async-42<<<", with_nested_async_fixture)
-        test.eq(252, fixture_C)
+        self_test.eq(">>>async-42<<<", with_nested_async_fixture)
+        self_test.eq(252, fixture_C)
 
 
-# define, test and install default fixture
-# do not use @test.fixture as we need to install this twice
 def tmp_path(name=None):
     with tempfile.TemporaryDirectory() as p:
         p = pathlib.Path(p)
@@ -606,125 +599,125 @@ def tmp_path(name=None):
             yield p/name
         else:
             yield p
-test.fixture(tmp_path)
+self_test.fixture(tmp_path)
 
 
 class tmp_files:
 
     path = None
 
-    @test
+    @self_test
     def temp_sync(tmp_path):
         assert tmp_path.exists()
 
-    @test
+    @self_test
     def temp_file_removal(tmp_path):
         global path
         path = tmp_path / 'aap'
         path.write_text("hello")
 
-    @test
+    @self_test
     def temp_file_gone():
         assert not path.exists()
 
-    @test
+    @self_test
     async def temp_async(tmp_path):
         assert tmp_path.exists()
 
-    @test
+    @self_test
     def temp_dir_with_file(tmp_path:'aap'):
         assert str(tmp_path).endswith('/aap')
         tmp_path.write_text('hi monkey')
         assert tmp_path.exists()
 
 
-@test
+@self_test
 def new_assert():
-    assert test.eq(1, 1)
-    assert test.lt(1, 2) # etc
+    assert self_test.eq(1, 1)
+    assert self_test.lt(1, 2) # etc
 
     try:
-        test.eq(1, 2)
-        test.fail(msg="too bad")
+        self_test.eq(1, 2)
+        self_test.fail(msg="too bad")
     except AssertionError as e:
         assert ('eq', 1, 2) == e.args, e.args
 
     try:
-        test.ne(1, 1)
-        test.fail()
+        self_test.ne(1, 1)
+        self_test.fail()
     except AssertionError as e:
         assert "('ne', 1, 1)" == str(e), str(e)
 
 
-@test
+@self_test
 def test_fail():
     try:
-        test.fail("plz fail")
+        self_test.fail("plz fail")
         raise AssertionError('FAILED to fail')
     except AssertionError as e:
         assert "plz fail" == str(e), e
 
     try:
-        test.fail("plz fail", info="more")
+        self_test.fail("plz fail", info="more")
         raise AssertionError('FAILED to fail')
     except AssertionError as e:
         assert "('plz fail', {'info': 'more'})" == str(e), e
 
 
-@test
+@self_test
 def not_operator():
-    test.comp.contains("abc", "d")
+    self_test.comp.contains("abc", "d")
     try:
-        test.comp.contains("abc", "b")
-        test.fail()
+        self_test.comp.contains("abc", "b")
+        self_test.fail()
     except AssertionError as e:
         assert "('contains', 'abc', 'b')" == str(e), e
 
 
-@test
+@self_test
 def call_method_as_operator():
-    test.endswith("aap", "ap")
+    self_test.endswith("aap", "ap")
 
 
-# test.<op> is really just assert++ and does not need @test to run 'in'
-test.eq(1, 1)
+# self_test.<op> is really just assert++ and does not need @test to run 'in'
+self_test.eq(1, 1)
 
 try:
-    test.lt(1, 1)
+    self_test.lt(1, 1)
 except AssertionError as e:
     assert "('lt', 1, 1)" == str(e), str(e)
 
 
-@test
+@self_test
 def test_testop_has_args():
     try:
-        @test(report=False)
+        @self_test(report=False)
         def nested_test_with_testop():
             x = 42
             y = 67
-            test.eq(x, y)
+            self_test.eq(x, y)
             return True
     except AssertionError as e:
         assert hasattr(e, 'args')
         assert 3 == len(e.args)
-        test.eq("('eq', 42, 67)", str(e))
+        self_test.eq("('eq', 42, 67)", str(e))
 
 
-with test.opts(report=False) as test:
-    @test
+with self_test.opts(report=False) as tst:
+    @tst
     def nested_defaults():
-        dflts0 = test._opts
+        dflts0 = tst._opts
         assert not dflts0['skip']
         assert not dflts0['report']
-        with test.opts(skip=True, report=True) as tst:
-            dflts1 = tst._opts
+        with tst.opts(skip=True, report=True) as tstk:
+            dflts1 = tstk._opts
             assert dflts1['skip']
             assert dflts1['report']
-            @tst
+            @tstk
             def fails_but_is_skipped():
-                test.eq(1, 2)
+                tstk.eq(1, 2)
             try:
-                with tst.opts(skip=False, report=False) as TeSt:
+                with tstk.opts(skip=False, report=False) as TeSt:
                     dflts2 = TeSt._opts
                     assert not dflts2['skip']
                     assert not dflts2['report']
@@ -732,16 +725,16 @@ with test.opts(report=False) as test:
                     def fails_but_is_not_reported():
                         TeSt.gt(1, 2)
                     tst.fail()
-                assert tst._opts == dflts1
+                assert tstk._opts == dflts1
             except AssertionError as e:
-                tst.eq("('gt', 1, 2)", str(e))
-        assert test._opts == dflts0
+                tstk.eq("('gt', 1, 2)", str(e))
+        assert tst._opts == dflts0
 
-    @test
+    @tst
     def shorthand_for_new_context_without_opts():
         """ Use this for defining new/tmp fixtures. """
-        ctx0 = test
-        with test() as t: # == test.opts()
+        ctx0 = tst
+        with tst() as t: # == self_test.opts()
             assert ctx0 != t
             assert ctx0.fixtures == t.fixtures
             assert ctx0.report == t.report
@@ -754,74 +747,74 @@ with test.opts(report=False) as test:
             assert "new_one" not in ctx0.fixtures
 
 
-@test
+@self_test
 def override_fixtures_in_new_context():
-    with test() as t:
-        assert test != t
+    with self_test() as t:
+        assert self_test != t
         @t.fixture
         def temporary_fixture():
             yield "tmp one"
         with t.temporary_fixture as tf1:
             assert "tmp one" == tf1
-        with test():
-            @test.fixture
+        with self_test():
+            @self_test.fixture
             def temporary_fixture():
                 yield "tmp two"
-            with test.temporary_fixture as tf2:
+            with self_test.temporary_fixture as tf2:
                 assert "tmp two" == tf2
         with t.temporary_fixture as tf1:
             assert "tmp one" == tf1
     try:
-        test.temporary_fixture
+        self_test.temporary_fixture
     except AttributeError:
         pass
 
 
-@test.fixture
+@self_test.fixture
 def area(r, d=1):
     import math
     yield round(math.pi * r * r, d)
 
-@test
+@self_test
 def fixtures_with_1_arg(area:3):
-    test.eq(28.3, area)
-@test
+    self_test.eq(28.3, area)
+@self_test
 def fixtures_with_2_args(area:(3,0)):
-    test.eq(28.0, area)
-@test
+    self_test.eq(28.0, area)
+@self_test
 async def fixtures_with_2_args_async(area:(3,2)):
-    test.eq(28.27, area)
+    self_test.eq(28.27, area)
 
-@test.fixture
+@self_test.fixture
 def answer(): yield 42
-@test.fixture
+@self_test.fixture
 def combine(a, area:2, answer): yield a * area * answer
-@test
+@self_test
 def fixtures_with_combined_args(combine:3):
-    test.eq(1587.6, combine)
+    self_test.eq(1587.6, combine)
 
 
-#@test  # test no longer modifies itself but creates a temporary runner when opts are given
+#@self_test  # test no longer modifies itself but creates a temporary runner when opts are given
 def combine_test_with_options():
     trace = []
-    @test(keep=True, my_opt=42)
+    @self_test(keep=True, my_opt=42)
     def f0():
-        trace.append(test._opts.get('my_opt'))
+        trace.append(self_test._opts.get('my_opt'))
     def f1(): # ordinary function; the only difference, here(!) is binding
-        trace.append(test._opts.get('my_opt'))
-    test(f0)
-    test(f0, my_opt=76)
-    test(f0, f1, my_opt=93)
+        trace.append(self_test._opts.get('my_opt'))
+    self_test(f0)
+    self_test(f0, my_opt=76)
+    self_test(f0, f1, my_opt=93)
     assert [None, None, 76, 93, 93] == trace, trace
-    # TODO make opts available in test when specificed in @test
-    # (@test(**opts) makes a one time anonymous context)
+    # TODO make opts available in test when specificed in @self_test
+    # (@self_test(**opts) makes a one time anonymous context)
     # maybe an optional argument 'context' which tests can declare??
 
 
 
-@test
+@self_test
 def gather_tests():
-    with test.gather() as suite:
+    with self_test.gather() as suite:
 
         @suite.fixture
         def a_fixture():
@@ -844,80 +837,79 @@ def gather_tests():
         @suite(gather=False)
         def t2(): pass
 
-    test.eq(1, len(subsuite0.gathered))
-    test.eq(78, subsuite0.gathered[0]())
-    test.eq(1, len(subsuite1.gathered))
-    test.eq(56, subsuite1.gathered[0]())
-    # test.eq(2, len(suite.gathered))  #TODO subsuite not part of super suite temporarily
+    self_test.eq(1, len(subsuite0.gathered))
+    self_test.eq(78, subsuite0.gathered[0]())
+    self_test.eq(1, len(subsuite1.gathered))
+    self_test.eq(56, subsuite1.gathered[0]())
+    # self_test.eq(2, len(suite.gathered))  #TODO subsuite not part of super suite temporarily
     # NB: running test function without context (reporting etc):
-    # test.eq('this is t0, with 42', suite.gathered[0](a_fixture=42))   # IDEM
+    # self_test.eq('this is t0, with 42', suite.gathered[0](a_fixture=42))   # IDEM
     """ deprecated; we could reintroduce 'bind' option to allow this
-    test.eq('this is t1, with 16', suite[1]())
+    self_test.eq('this is t1, with 16', suite[1]())
     """
-    test.eq(1, len(subsuite0.gathered))
-    test.eq(1, len(subsuite1.gathered))
-    # test.eq(2, len(suite.gathered))  # IDEM
+    self_test.eq(1, len(subsuite0.gathered))
+    self_test.eq(1, len(subsuite1.gathered))
+    # self_test.eq(2, len(suite.gathered))  # IDEM
 
-#@test    TODO properly (re) implement suites
+#@self_test    TODO properly (re) implement suites
 def run_suite():
     trace = []
-    with test.gather(keep=True) as suite:
-        @test.fixture
+    with self_test.gather(keep=True) as suite:
+        @self_test.fixture
         def a():
             yield 42
-        @test
+        @self_test
         def a1(a):
             assert 0 == a % 42
             trace.append(f"a1:{a}")
-        @test
+        @self_test
         def a2(a):
             assert 0 == a % 42
             trace.append(f"a2:{a}")
     # run in new context
-    with test():
-        @test.fixture
+    with self_test():
+        @self_test.fixture
         def a():
             yield 84
         # different ways to run a test function:
         a1(126)            # NB: no context at all, not reported
-        test(a1)
-        test(suite[0])
-        test(*suite)
-        test(a1, a2)
+        self_test(a1)
+        self_test(suite[0])
+        self_test(*suite)
+        self_test(a1, a2)
         # just to be sure
-        test.eq(["a1:42", "a2:42", "a1:126", "a1:84", "a1:84", "a1:84", "a2:84", "a1:84", "a2:84"], trace)
+        self_test.eq(["a1:42", "a2:42", "a1:126", "a1:84", "a1:84", "a1:84", "a2:84", "a1:84", "a2:84"], trace)
 
-
-@test
+@self_test
 def test_calls_other_test():
-    @test(keep=True, report=False)
+    @self_test(keep=True, report=False)
     def test_a():
         assert 1 == 1
         return True
-    @test(report=False)
+    @self_test(report=False)
     def test_b():
         assert test_a()
 
 
-@test
+@self_test
 def test_calls_other_test_with_fixture():
-    @test(keep=True, report=False)
+    @self_test(keep=True, report=False)
     def test_a(fixture_A):
         assert 42 == fixture_A
         return True
-    @test(report=False)
+    @self_test(report=False)
     def test_b():
         assert test_a(fixture_A=42)
 
 
-@test
+@self_test
 def test_calls_other_test_with_fixture_and_more_args():
-    @test(keep=True, report=False, skip=True)
+    @self_test(keep=True, report=False, skip=True)
     def test_a(fixture_A, value):
         assert 42 == fixture_A
         assert 16 == value
         return True
-    @test(report=False)
+    @self_test(report=False)
     def test_b(fixture_A):
         assert test_a(fixture_A=42, value=16)
 
@@ -928,13 +920,14 @@ def test_calls_other_test_with_fixture_and_more_args():
 # I write def test(open=Value)
 # I think supporting both is a good idea
 
-@test
+
+@self_test
 def call_test_with_complete_context():
-    @test(keep=True)
+    @self_test(keep=True)
     def a_test():
         assert True
     assert a_test
-    test(a_test)
+    self_test(a_test)
 
 
 def capture(name):
@@ -957,21 +950,19 @@ def capture(name):
         setattr(sys, name, org_stream)
 
 
-# define, test and install default fixture
-# do not use @test.fixture as we need to install this twice
+# do not use @self_test.fixture as we need to install this twice
 def stdout():
     yield from capture('stdout')
-test.fixture(stdout)
+self_test.fixture(stdout)
 
 
-# define, test and install default fixture
 # do not use @test.fixture as we need to install this twice
 def stderr():
     yield from capture('stderr')
-test.fixture(stderr)
+self_test.fixture(stderr)
 
 
-@test
+@self_test
 async def async_function():
     await asyncio.sleep(0)
     assert True
@@ -992,42 +983,42 @@ def raises(exception=Exception, message=None):
         e = AssertionError(f"should raise {exception.__name__}")
         e.__suppress_context__ = True
         raise e
-test.fixture(raises)
+self_test.fixture(raises)
 
 
-@test
+@self_test
 def assert_raises():
-    with test.raises:
+    with self_test.raises:
         raise Exception
     try:
-        with test.raises:
+        with self_test.raises:
             pass
     except AssertionError as e:
         assert 'should raise Exception' == str(e), e
 
 
-@test
+@self_test
 def assert_raises_specific_exception():
-    with test.raises(KeyError):
+    with self_test.raises(KeyError):
         raise KeyError
     try:
-        with test.raises(KeyError):
+        with self_test.raises(KeyError):
             raise RuntimeError('oops')
     except AssertionError as e:
         assert 'should raise KeyError but raised RuntimeError' == str(e), str(e)
     try:
-        with test.raises(KeyError):
+        with self_test.raises(KeyError):
             pass
     except AssertionError as e:
         assert 'should raise KeyError' == str(e), e
 
 
-@test
+@self_test
 def assert_raises_specific_message():
-    with test.raises(RuntimeError, "hey man!"):
+    with self_test.raises(RuntimeError, "hey man!"):
         raise RuntimeError("hey man!")
     try:
-        with test.raises(RuntimeError, "hey woman!"):
+        with self_test.raises(RuntimeError, "hey woman!"):
             raise RuntimeError("hey man!")
     except AssertionError as e:
         assert "should raise RuntimeError with message 'hey woman!'" == str(e)
@@ -1035,7 +1026,7 @@ def assert_raises_specific_message():
 
 
 def import_syntax_error():
-    with test.tmp_path as p:
+    with self_test.tmp_path as p:
         try:
             sys.path.append(str(p))
             (p/'my_sub_module_syntax_error.py').write_text('syntax error')
@@ -1054,12 +1045,12 @@ def is_internal(frame):
            '<frozen importlib' in nm or \
            is_builtin(frame)   # TODO testme
 
-#@test
+#@self_test
 def guess_module():
     def f():
         pass
-    test.eq('tester', inspect.getmodule(f).__name__)
-    test.eq('tester', inspect.getmodule(f.__code__).__name__)
+    self_test.eq('tester', inspect.getmodule(f).__name__)
+    self_test.eq('tester', inspect.getmodule(f.__code__).__name__)
 
 
 def bind_names(bindings, names, frame):
@@ -1105,7 +1096,7 @@ class X:
     a = 'scope:X'
     x = 11
 
-    @test(keep=True)
+    @self_test(keep=True)
     def C(fixture_A):
         a = 'scope:C'
         c = 12
@@ -1118,7 +1109,7 @@ class X:
         assert 42 == fixture_A, fixture_A
         return fixture_A
 
-    @test(keep=True)
+    @self_test(keep=True)
     def D(fixture_A, fixture_B):
         a = 'scope:D'
         assert 'scope:D' == a
@@ -1136,7 +1127,7 @@ class X:
         b = None
         y = 13
 
-        @test
+        @self_test
         def h(fixture_C):
             assert 'scope:Y' == a
             assert None == b
@@ -1152,83 +1143,83 @@ class X:
             assert 252 == fixture_C, fixture_C
 
     v = 45
-    @test.fixture
+    @self_test.fixture
     def f_A():
         yield v
 
-    @test
+    @self_test
     def fixtures_can_also_see_attrs_from_classed_being_defined(f_A):
         assert v == f_A, f_A
 
-    @test
+    @self_test
     async def coroutines_can_also_see_attrs_from_classed_being_defined(f_A):
         assert v == f_A, f_A
 
 
-@test
+@self_test
 def access_closure_from_enclosing_def():
     a = 46              # accessing this in another function makes it a 'freevar', which needs a closure
-    @test
+    @self_test
     def access_a():
         assert 46 == a
 
 
 f = 16
 
-@test
+@self_test
 def dont_confuse_app_vars_with_internal_vars():
     assert 16 == f
 
 
-@test.fixture
+@self_test.fixture
 def fixture_D(fixture_A, a = 10):
     yield a
 
 
-@test
+@self_test
 def use_fixtures_as_context():
-    with test.fixture_A as a:
+    with self_test.fixture_A as a:
         assert 42 == a
-    with test.fixture_B as b: # or pass parameter/fixture ourselves?
+    with self_test.fixture_B as b: # or pass parameter/fixture ourselves?
         assert 84 == b
-    with test.fixture_C as c:
+    with self_test.fixture_C as c:
         assert 252 == c
-    with test.stdout as s:
+    with self_test.stdout as s:
         print("hello!")
         assert "hello!\n" == s.getvalue()
     keep = []
-    with test.tmp_path as p:
+    with self_test.tmp_path as p:
         keep.append(p)
         (p / "f").write_text("contents")
     assert not keep[0].exists()
     # it is possible to supply additional args when used as context
-    with test.fixture_D as d: # only fixture as arg
+    with self_test.fixture_D as d: # only fixture as arg
         assert 10 == d
-    #with test.fixture_D() as d: # idem
+    #with self_test.fixture_D() as d: # idem
     #    assert 10 == d
-    with test.fixture_D(16) as d: # fixture arg + addtional arg
+    with self_test.fixture_D(16) as d: # fixture arg + addtional arg
         assert 16 == d
 
 
-# with test.<fixture> does not need @test to run 'in'
-with test.tmp_path as p:
+# with self_test.<fixture> does not need @test to run 'in'
+with self_test.tmp_path as p:
     assert p.exists()
 assert not p.exists()
 
 
-@test
+@self_test
 def idea_for_dumb_diffs():
     # if you want a so called smart diff: the second arg of assert is meant for it.
     # Runner supplies a generic (lazy) diff between two pretty printed values
     a = [7, 1, 2, 8, 3, 4]
     b = [1, 2, 9, 3, 4, 6]
-    d = test.diff(a, b)
+    d = self_test.diff(a, b)
     assert str != type(d)
     assert callable(d.__str__)
     assert str == type(str(d))
 
     try:
-        assert a == b, test.diff(a,b)
+        assert a == b, self_test.diff(a,b)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -1239,16 +1230,16 @@ def idea_for_dumb_diffs():
 """ == str(e)
 
 
-    # you can als pass a diff function to test.<op>().
+    # you can als pass a diff function to self_test.<op>().
     # diff should accept the args preceeding it
     # str is called on the result, so you can make it lazy
     try:
-        test.eq("aap", "ape", msg=lambda x, y: f"{x} mydiff {y}")
+        self_test.eq("aap", "ape", msg=lambda x, y: f"{x} mydiff {y}")
     except AssertionError as e:
         assert "aap mydiff ape" == str(e)
 
     try:
-        test.eq(a, b, msg=test.diff)
+        self_test.eq(a, b, msg=self_test.diff)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -1267,11 +1258,11 @@ def idea_for_dumb_diffs():
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
     try:
-        test.eq(a, b, msg=set.symmetric_difference)
+        self_test.eq(a, b, msg=set.symmetric_difference)
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
 
-#@test # temp disable bc it cause system installed autotest import via diff2
+#@self_test # temp disable bc it cause system installed autotest import via diff2
 def diff2_sorting_including_uncomparables():
     msg = """
   {
@@ -1284,18 +1275,18 @@ def diff2_sorting_including_uncomparables():
 
 -     <class 'bool'>,
   }"""
-    with test.raises(AssertionError, msg):
-        test.eq({dict: bool}, {str, 1}, msg=test.diff2)
+    with self_test.raises(AssertionError, msg):
+        self_test.eq({dict: bool}, {str, 1}, msg=self_test.diff2)
 
 
-@test
+@self_test
 def bind_test_functions_to_their_fixtures():
 
-    @test.fixture
+    @self_test.fixture
     def my_fix():
         yield 34
 
-    @test(skip=True, keep=True, report=True)
+    @self_test(skip=True, keep=True, report=True)
     def override_fixture_binding_with_kwarg(my_fix):
         assert 34 != my_fix, "should be 34"
         assert 56 == my_fix
@@ -1305,18 +1296,18 @@ def bind_test_functions_to_their_fixtures():
     assert v == 56
 
     try:
-        test(override_fixture_binding_with_kwarg)
+        self_test(override_fixture_binding_with_kwarg)
     except AssertionError as e:
-        test.eq("should be 34", str(e))
+        self_test.eq("should be 34", str(e))
 
 
-    @test(keep=True)
+    @self_test(keep=True)
     def bound_fixture_1(my_fix):
         assert 34 == my_fix, my_fix
         return my_fix
 
     # general way to rerun a test with other fixtures:
-    with test.opts() as t:
+    with self_test.opts() as t:
         @t.fixture
         def my_fix():
             yield 89
@@ -1324,15 +1315,15 @@ def bind_test_functions_to_their_fixtures():
             t(bound_fixture_1)
         except AssertionError as e:
             assert "89" == str(e)
-    with test.my_fix as x:
+    with self_test.my_fix as x:
         assert 34 == x, x # old fixture back
 
-    @test.fixture
+    @self_test.fixture
     def my_fix(): # redefine fixture purposely to test time of binding
         yield 78
 
     """ deprecated
-    @test(keep=True, skip=True) # skip, need more args
+    @self_test(keep=True, skip=True) # skip, need more args
     def bound_fixture_2(my_fix, result, *, extra=None):
         assert 78 == my_fix
         return result, extra
@@ -1343,7 +1334,7 @@ def bind_test_functions_to_their_fixtures():
     class A:
         a = 34
 
-        @test(keep=True) # skip, need more args
+        @self_test(keep=True) # skip, need more args
         def bound_fixture_acces_class_locals(my_fix):
             assert 78 == my_fix
             assert 34 == a
@@ -1351,9 +1342,9 @@ def bind_test_functions_to_their_fixtures():
         assert 34 == bound_fixture_acces_class_locals(78)
 
     """ deprecated
-    with test.opts(keep=True):
+    with self_test.opts(keep=True):
 
-        @test
+        @self_test
         def bound_by_default(my_fix):
             assert 78 == my_fix
             return my_fix
@@ -1363,20 +1354,20 @@ def bind_test_functions_to_their_fixtures():
 
     trace = []
 
-    @test.fixture
+    @self_test.fixture
     def enumerate():
         trace.append('S')
         yield 1
         trace.append('E')
 
-    @test(keep=True, skip=True)
+    @self_test(keep=True, skip=True)
     def rebind_on_every_call(enumerate):
         return True
 
     assert [] == trace
-    test(rebind_on_every_call)
+    self_test(rebind_on_every_call)
     assert ['S', 'E'] == trace
-    test(rebind_on_every_call)
+    self_test(rebind_on_every_call)
     assert ['S', 'E', 'S', 'E'] == trace
 
 
@@ -1392,7 +1383,7 @@ def filter_traceback(root):
     return root
 
 
-@test
+@self_test
 def trace_backfiltering():
     def eq(a, b):
         AUTOTEST_INTERNAL = 1
@@ -1408,7 +1399,7 @@ def trace_backfiltering():
     def A():
         B_in_betwixt()
 
-    test.contains(B_in_betwixt.__code__.co_varnames, 'AUTOTEST_INTERNAL')
+    self_test.contains(B_in_betwixt.__code__.co_varnames, 'AUTOTEST_INTERNAL')
 
     def test_names(*should):
         _, _, tb = sys.exc_info()
@@ -1463,31 +1454,31 @@ def trace_backfiltering():
         test_names('trace_backfiltering', 'C', 'A', 'B')
 
     try:
-        @test
+        @self_test
         def test_for_real_with_Runner_involved():
-            test.eq(1, 2)
+            self_test.eq(1, 2)
     except AssertionError:
         test_names('trace_backfiltering', 'test_for_real_with_Runner_involved')
 
 
-@test
+@self_test
 def test_isinstance():
-    test.isinstance(1, int)
-    test.isinstance(1.1, (int, float))
-    with test.raises(AssertionError, "'int' is not an instance of 'str'"):
-        test.isinstance(1, str)
-    with test.raises(AssertionError, "'int' is not an instance of ['str', 'dict']"):
-        test.isinstance(1, (str, dict))
+    self_test.isinstance(1, int)
+    self_test.isinstance(1.1, (int, float))
+    with self_test.raises(AssertionError, "'int' is not an instance of 'str'"):
+        self_test.isinstance(1, str)
+    with self_test.raises(AssertionError, "'int' is not an instance of ['str', 'dict']"):
+        self_test.isinstance(1, (str, dict))
 
 
 
-@test.fixture
+@self_test.fixture
 async def slow_callback_duration(s):
     asyncio.get_running_loop().slow_callback_duration = s
     yield
 
 
-#@test
+#@self_test
 def probeer():
     assert False
 
@@ -1505,21 +1496,11 @@ class wildcard:
     def __repr__(self):
         return self.f.__name__  + '(...)' if self.f else '*'
 
-test.any = wildcard()
+self_test.any = wildcard()
 
 
-@test
+@self_test
 def wildcard_matching():
-    test.eq([test.any, 42], [16, 42])
-    test.eq([test.any(lambda x: x in [1,2,3]), 78], [2, 78])
-    test.ne([test.any(lambda x: x in [1,2,3]), 78], [4, 78])
-
-
-
-# clean up the default test runner and (re)install default fixtures
-#test.reset()
-for fx in (tmp_path, stdout, stderr, raises):
-    test.fixture(fx)
-
-
-
+    self_test.eq([self_test.any, 42], [16, 42])
+    self_test.eq([self_test.any(lambda x: x in [1,2,3]), 78], [2, 78])
+    self_test.ne([self_test.any(lambda x: x in [1,2,3]), 78], [4, 78])
