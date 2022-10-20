@@ -37,6 +37,13 @@ from utils import is_main_process
 __all__ = ['test', 'Runner']
 
 
+CRITICAL = logging.CRITICAL
+UNIT = logging.ERROR
+INTEGRATION = logging.WARNING
+PERFORMANCE = logging.INFO
+NOTSET = logging.NOTSET
+
+
 class Report:
 
     def __init__(self, handlers=()):
@@ -55,7 +62,6 @@ class Report:
 
     def start(self, test):
         if test.runner.options.get('report'):
-            print(test, flush=True)
             self.reported += 1
 
     def done(self, test):
@@ -68,7 +74,6 @@ class Report:
         pass
 
 
-
 defaults = dict(
             skip    = not is_main_process or __name__ == '__mp_main__',
             keep    = False,      # Ditch test functions after running, or keep them in their namespace.
@@ -78,16 +83,17 @@ defaults = dict(
             coverage= False,      # invoke trace module
             debug   = True,       # use debug for asyncio.run
             diff    = None,       # set a function for printing diffs on failures
+            level   = UNIT,       # default test level
         )
 
 class Runner:
     """ Main tool for running tests across modules and programs. """
 
-    def __init__(self, name, parent=None, reporter=None, gathered=None, **opts):
+    def __init__(self, name=None, parent=None, reporter=None, gathered=None, **opts):
+        self._handlers = []
         self.parent = parent
-        self.name = name
-        self.handlers = []
-        self.report = reporter if reporter else Report(self.handlers)
+        self.name = parent.name if name is None else name # support anoymous subrunners
+        self.report = reporter if reporter else Report(self.get_handlers())
         if parent:
             self.fixtures = parent.fixtures.new_child()
             self.options = parent.options.new_child(m=opts)
@@ -100,18 +106,24 @@ class Runner:
         return Runner(parent=self, name=name, reporter=self.report, 
                 gathered=self.gathered if gathered is None else gathered, **opts)
 
-    def getChild(self, name):
+    def getChild(self, name, **opts):
         """ modelled after logging.getChild """
-        return self.clone({}, name=self.name + '.' + name)
+        return self.clone(opts, name=self.name + '.' + name)
+
+    def get_handlers(self):
+        if not self._handlers:
+            self._handlers = [logging.getLogger()] # logger is handler too
+        return self._handlers
 
     def addHandler(self, handler):
-        self.handlers.append(handler)
+        self.get_handlers().append(handler)
 
     def handle(self, record):
-        for h in self.handlers:
+        for h in self.get_handlers():
             h.handle(record)
         if self.parent:
             self.parent.handle(record)
+
 
     def run(self, test_func, *app_args, **app_kwds):
         """ Binds f to stack vars and fixtures and runs it immediately. """
@@ -119,6 +131,9 @@ class Runner:
         self.report.found(self)
         bind_func = bind_1_frame_back(test_func)
         skip = self.options.get('skip')
+        level = self.options.get('level', UNIT)
+        plevel = self.parent.options.get('level', UNIT) if self.parent else UNIT
+        skip = skip or level < plevel
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             wf = WithFixtures(self, bind_func)
             self.handle(logging.LogRecord(
@@ -126,7 +141,7 @@ class Runner:
                 logging.CRITICAL,                  # log level: might depend on test type (unit, integration, performance, etc)
                 test_func.__code__.co_filename,    # source file where test is
                 test_func.__code__.co_firstlineno, # line where test is
-                'test',                            # message
+                f'{test_func.__qualname__}',       # message
                 (),                                # args (passed to message.format)
                 None,                              # exc_info
                 test_func.__name__,                # name of the function invoking test.<op>
@@ -138,27 +153,40 @@ class Runner:
         return bind_func if self.options.get('keep') else None
 
 
+    def critical(self, *a, **kw):
+        return self(*a, level=CRITICAL, **kw)
+
+    def unit(self, *a, **kw):
+        return self(*a, level=UNIT, **kw)
+
+    def integration(self, *a, **kw):
+        return self(*a, level=INTEGRATION, **kw)
+
+    def performance(self, *a, **kw):
+        return self(*a, level=PERFORMANCE, **kw)
+
+
     def __call__(self, *fs, **opts):
         """Decorator to define, run and report a test, with one-time options when given. """
         AUTOTEST_INTERNAL = 1
         if opts and not fs:
             return self.clone(opts).run       # @test(opt=value,...)
         elif len(fs) == 1:
-            with self.opts(**opts):
+            with self.opts(**opts) as tmp:
                 f, = fs
                 if isinstance(f, tuple):
-                    return self.run(*f)
-                return self.run(*fs)           # @test or test(f, **opts)
+                    return tmp.run(*f)
+                return tmp.run(*fs)           # @test or test(f, **opts)
         elif len(fs) > 1:
-            with self.opts(**opts):
+            with self.opts(**opts) as tmp:
                 for f in fs:                      # test(*suite)
-                    self.run(f)
+                    tmp.run(f)
         else:
             return self.opts()                    # with test():
 
 
     @contextlib.contextmanager
-    def opts(self, gathered=None, **opts):
+    def opts(self, gathered=None, name=None, **opts):
         """ create sub tester with opts """
         yield self.clone(opts, gathered=gathered)
 
@@ -280,8 +308,6 @@ class WithFixtures:
         self.func = f
     def __call__(self, *a, **k):
         return self.func(*a, **k)
-    def __str__(self):
-        return f"{self.func.__module__}  \33[1m{self.func.__name__}\033[0m  "
 
 
 
@@ -410,10 +436,6 @@ class WithFixtures:
     def __init__(self, runner, func):
         self.runner = runner
         self.func = func
-
-
-    def __str__(self):
-        return f"{self.func.__module__}  \33[1m{self.func.__name__}\033[0m  "
 
 
     def __call__(self, *args, **kwds):
@@ -838,7 +860,7 @@ def combine_test_with_options():
 
 
 
-@self_test
+#@self_test
 def gather_tests():
     with self_test.gather() as suite:
 
@@ -1240,8 +1262,6 @@ def idea_for_dumb_diffs():
     a = [7, 1, 2, 8, 3, 4]
     b = [1, 2, 9, 3, 4, 6]
     d = self_test.diff(a, b)
-    #assert str != type(d)           # no longer lazy_str
-    #assert callable(d.__str__)
     assert str == type(str(d))
 
     try:
@@ -1579,25 +1599,22 @@ class logging_handlers:
         def a_test():
             tester.eq(1,1)
         log_msg = s.getvalue()
-        self_test.eq(log_msg, f"carl-50-{__file__}-{_line_+1}-test-None-a_test-None\n")
+        qname = "logging_handlers.tester_with_handler.<locals>.a_test"
+        self_test.eq(log_msg, f"carl-50-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
 
 
     @self_test
     def sub_tester(logging_runner:'main'):
-        main = Runner("main")
-        s = io.StringIO()
-        from logging import StreamHandler
-        myhandler = StreamHandler(s)
-        myhandler.setFormatter(logging.Formatter(fmt="{name}-{levelno}-{pathname}-{lineno}-{message}-{exc_info}-{funcName}-{stack_info}", style='{'))
+        main, s = logging_runner
         sub = main.getChild('sub1')
-        main.addHandler(myhandler)
         _line_ = inspect.currentframe().f_lineno
         @sub
         def my_sub_test():
             sub.eq(1,1)
         log_msg = s.getvalue()
         self_test.startswith(log_msg, f"main.sub1-")
-        self_test.eq(log_msg, f"main.sub1-50-{__file__}-{_line_+1}-test-None-my_sub_test-None\n")
+        qname = "logging_handlers.sub_tester.<locals>.my_sub_test"
+        self_test.eq(log_msg, f"main.sub1-50-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
 
 
     @self_test
@@ -1611,6 +1628,30 @@ class logging_handlers:
         except AssertionError:
             pass
         log_msg = s.getvalue()
-        self_test.eq(log_msg, f"esmee-50-{__file__}-{_line_+1}-test-None-a_failing_test-None\n")
+        qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
+        self_test.eq(log_msg, f"esmee-50-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
 
+
+class testing_levels:
+    runs = [None, None]
+    with self_test.opts('tst', level=CRITICAL) as tst:
+        assert tst.options['level'] == CRITICAL
+        @tst.critical
+        def a_critial_test_always_runs():
+            runs[0] = True
+        assert tst.options['level'] == CRITICAL
+        @tst.unit
+        def a_unit_test_often_runs():
+            runs[1] = True
+    self_test.eq([True, None], runs)
+
+    runs = [None, None]
+    with self_test.opts(level=INTEGRATION) as tst:
+        @tst.integration
+        def a_integration_test_sometimes_runs():
+            runs[0] = True
+        @tst.performance
+        def a_performance_test_sometimes_runs():
+            runs[1] = True
+    self_test.eq([True, None], runs)
 

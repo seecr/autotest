@@ -19,6 +19,12 @@ def insert_excepthook(new_hook):
 
 
 
+# TODO default runner could do fancier logging:
+    #def __str__(self):
+    #    return f"{self.func.__module__}  \33[1m{self.func.__name__}\033[0m  "
+
+
+
 def main():
     print(" NEW AUTOTEST ")
     # experimental main; not tested
