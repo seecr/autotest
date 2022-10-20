@@ -26,7 +26,9 @@ import difflib
 import collections
 import pprint
 import builtins
-import unittest.mock as mock
+import threading
+import io
+import logging
 
 
 from utils import is_main_process
@@ -37,10 +39,11 @@ __all__ = ['test', 'Runner']
 
 class Report:
 
-    def __init__(self):
+    def __init__(self, handlers=()):
         self.total = 0
         self.ran = 0
         self.reported = 0
+        self.handlers = handlers
 
     def __call__(self, test, *app_args, **app_kwds):
         AUTOTEST_INTERNAL = 1
@@ -80,8 +83,11 @@ defaults = dict(
 class Runner:
     """ Main tool for running tests across modules and programs. """
 
-    def __init__(self, parent=None, reporter=None, gathered=None, **opts):
-        self.report = reporter if reporter else Report()
+    def __init__(self, name, parent=None, reporter=None, gathered=None, **opts):
+        self.parent = parent
+        self.name = name
+        self.handlers = []
+        self.report = reporter if reporter else Report(self.handlers)
         if parent:
             self.fixtures = parent.fixtures.new_child()
             self.options = parent.options.new_child(m=opts)
@@ -90,9 +96,22 @@ class Runner:
             self.options = collections.ChainMap(opts, defaults)
         self.gathered = gathered if gathered else []
 
-    def clone(self, opts, gathered=None):
-        return Runner(parent=self, reporter=self.report, 
+    def clone(self, opts, gathered=None, name=None):
+        return Runner(parent=self, name=name, reporter=self.report, 
                 gathered=self.gathered if gathered is None else gathered, **opts)
+
+    def getChild(self, name):
+        """ modelled after logging.getChild """
+        return self.clone({}, name=self.name + '.' + name)
+
+    def addHandler(self, handler):
+        self.handlers.append(handler)
+
+    def handle(self, record):
+        for h in self.handlers:
+            h.handle(record)
+        if self.parent:
+            self.parent.handle(record)
 
     def run(self, test_func, *app_args, **app_kwds):
         """ Binds f to stack vars and fixtures and runs it immediately. """
@@ -101,7 +120,19 @@ class Runner:
         bind_func = bind_1_frame_back(test_func)
         skip = self.options.get('skip')
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
-            self.report(WithFixtures(self, bind_func), *app_args, **app_kwds)
+            wf = WithFixtures(self, bind_func)
+            self.handle(logging.LogRecord(
+                self.name,                         # name of logger
+                logging.CRITICAL,                  # log level: might depend on test type (unit, integration, performance, etc)
+                test_func.__code__.co_filename,    # source file where test is
+                test_func.__code__.co_firstlineno, # line where test is
+                'test',                            # message
+                (),                                # args (passed to message.format)
+                None,                              # exc_info
+                test_func.__name__,                # name of the function invoking test.<op>
+                None                               # text representation of stack
+                ))
+            self.report(wf, *app_args, **app_kwds)
         if self.options.get('gather'):
             self.gathered.append(bind_func)
         return bind_func if self.options.get('keep') else None
@@ -228,7 +259,7 @@ class Runner:
         return getattr(self.Operator(diff=self.options.get('diff')), name)
 
 
-self_test = Runner() # separate runner for bootstrapping/self testing
+self_test = Runner('autotest-self-tests') # separate runner for bootstrapping/self testing
 
 
 def iterate(f, v):
@@ -262,9 +293,6 @@ ArgsCollectingContextManager = contextlib.contextmanager
 def bind_1_frame_back(_func_):
     return _func_
 
-
-
-trace = []
 
 
 from numbers import Number
@@ -399,8 +427,7 @@ class WithFixtures:
             else:
                 """ we get called by sync code (a decorator during def) which in turn
                     is called from async code. The only way to run this async test
-                    is in a new event loop (in anothr thread) """
-                import threading
+                    is in a new event loop (in another thread) """
                 t = threading.Thread(target=asyncio.run, args=(coro,),
                         kwargs={'debug': self.runner.options.get('debug')})
                 t.start()
@@ -467,6 +494,7 @@ class WithFixtures:
                 tb1 = frame_to_traceback(s[-1])
                 raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
 
+trace = []
 
 @self_test.fixture
 def fx_a():
@@ -1513,7 +1541,7 @@ def wildcard_matching():
     self_test.ne([self_test.any(lambda x: x in [1,2,3]), 78], [4, 78])
 
 
-class nexted_async_tests:
+class nested_async_tests:
     done = [False, False, False]
 
     @self_test
@@ -1529,4 +1557,60 @@ class nexted_async_tests:
                 done[2] = True
 
     self_test.all(done)
+
+
+class logging_handlers:
+
+    @self_test.fixture
+    def logging_runner(name='main'):
+        s = io.StringIO()
+        myhandler = logging.StreamHandler(s)
+        myhandler.setFormatter(logging.Formatter(fmt="{name}-{levelno}-{pathname}-{lineno}-{message}-{exc_info}-{funcName}-{stack_info}", style='{'))
+        tester = Runner(name)
+        tester.addHandler(myhandler)
+        yield tester, s
+
+
+    @self_test
+    def tester_with_handler(logging_runner:'carl'):
+        tester, s = logging_runner
+        _line_ = inspect.currentframe().f_lineno
+        @tester
+        def a_test():
+            tester.eq(1,1)
+        log_msg = s.getvalue()
+        self_test.eq(log_msg, f"carl-50-{__file__}-{_line_+1}-test-None-a_test-None\n")
+
+
+    @self_test
+    def sub_tester(logging_runner:'main'):
+        main = Runner("main")
+        s = io.StringIO()
+        from logging import StreamHandler
+        myhandler = StreamHandler(s)
+        myhandler.setFormatter(logging.Formatter(fmt="{name}-{levelno}-{pathname}-{lineno}-{message}-{exc_info}-{funcName}-{stack_info}", style='{'))
+        sub = main.getChild('sub1')
+        main.addHandler(myhandler)
+        _line_ = inspect.currentframe().f_lineno
+        @sub
+        def my_sub_test():
+            sub.eq(1,1)
+        log_msg = s.getvalue()
+        self_test.startswith(log_msg, f"main.sub1-")
+        self_test.eq(log_msg, f"main.sub1-50-{__file__}-{_line_+1}-test-None-my_sub_test-None\n")
+
+
+    @self_test
+    def tester_with_handler_failing(logging_runner:'esmee'):
+        tester, s = logging_runner
+        try:
+            _line_ = inspect.currentframe().f_lineno
+            @tester
+            def a_failing_test():
+                tester.eq(1,2)
+        except AssertionError:
+            pass
+        log_msg = s.getvalue()
+        self_test.eq(log_msg, f"esmee-50-{__file__}-{_line_+1}-test-None-a_failing_test-None\n")
+
 
