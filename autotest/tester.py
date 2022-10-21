@@ -19,7 +19,7 @@ import functools        # wrapping function in async generator
 import asyncio          # support for async test and fixtures
 import difflib          # show diffs on failed tests with two args
 import pprint           # show diffs on failed tests with two args
-import collections      # chain maps for hierarchical Runners
+import collections      # chain maps for hierarchical Runners and Counter
 import operator         # operators for asserting
 import builtins         # operators for asserting
 import threading        # run nested async tests in thread
@@ -40,132 +40,129 @@ NOTSET      = logging.NOTSET
 
 
 defaults = dict(
-            skip      = not is_main_process or __name__ == '__mp_main__',
-            keep      = False,      # Ditch test functions after running
-            timeout   = 2,          # asyncio task timeout
-            debug     = True,       # use debug for asyncio.run
-            diff      = None,       # set a function for printing diffs on failures
-            level     = UNIT,       # default test level
-        )
+    skip      = not is_main_process or __name__ == '__mp_main__',
+    keep      = False,      # Ditch test functions after running
+    timeout   = 2,          # asyncio task timeout
+    debug     = True,       # use debug for asyncio.run
+    diff      = None,       # set a function for printing diffs on failures
+    level     = UNIT,       # default test level
+)
 
-class Runner:
+
+class Runner: # aka Tester
     """ Main tool for running tests across modules and programs. """
 
     def __init__(self, name=None, parent=None, **opts):
-        self._handlers = []
-        self.parent = parent
+        self._parent = parent
         if parent:
-            self.name = parent.name + '.' + name if name else parent.name
-            self.fixtures = parent.fixtures.new_child()
-            self.options = parent.options.new_child(m=opts)
+            self._name = parent._name + '.' + name if name else parent._name
+            self._fixtures = parent._fixtures.new_child()
+            self._options = parent._options.new_child(m=opts)
         else:
-            self.name = name
-            self.fixtures = collections.ChainMap()
-            self.options = collections.ChainMap(opts, defaults)
-        self.stats = collections.Counter()
+            self._name = name
+            self._fixtures = collections.ChainMap()
+            self._options = collections.ChainMap(opts, defaults)
+        self._stats = collections.Counter()
+        self._loghandlers = []
 
-    def stat(self, key):
-        self.stats[key] += 1
-        if p := self.parent:
-            p.stat(key)
 
-    def getChild(self, name, **opts):
-        """ modelled after logging.getChild """
-        return Runner(parent=self, name=name, **opts)
+    def _stat(self, key):
+        self._stats[key] += 1
+        if p := self._parent:
+            p._stat(key)
 
-    def get_handlers(self):
-        return self._handlers
+
+    def getChild(self, *a, **k):
+        return Runner(parent=self, *a, **k)
+
+
+    @contextlib.contextmanager
+    def child(self, *a, **k):
+        child = self.getChild(*a, **k)
+        yield child
+        child._log_stats()
+
 
     def addHandler(self, handler):
-        self.get_handlers().append(handler)
+        self._loghandlers.append(handler)
 
-    def handle(self, record):
-        if handlers := self._handlers:
+
+    def handle(self, logrecord):
+        if handlers := self._loghandlers:
             for h in handlers:
-                h.handle(record)
-        elif self.parent:
-            self.parent.handle(record)
+                h.handle(logrecord)
+        elif self._parent:
+            self._parent.handle(logrecord)
         else:
-            logging.getLogger().handle(record)
+            logging.getLogger().handle(logrecord)
 
-    def create_log_record(self, f, msg):
+
+    def _create_logrecord(self, f, msg):
         return logging.LogRecord(
-            self.name,                         # name of logger
-            self.options.get('level'),                  # log level: might depend on test type (unit, integration, performance, etc)
+            self._name,                               # name of logger
+            self._options.get('level'),               # log level
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
-            msg,       # message
-            (),                                # args (passed to message.format)
-            None,                              # exc_info
+            msg,                                      # message
+            (),                                       # args (passed to message.format)
+            None,                                     # exc_info
             f.__name__ if f else None,                # name of the function invoking test.<op>
-            None                               # text representation of stack
+            None                                      # text representation of stack
             )
 
 
-    def run(self, test_func, *app_args, **app_kwds):
+    def _run(self, test_func, *app_args, **app_kwds):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
-        self.stat('found')
+        self._stat('found')
         bind_func = bind_1_frame_back(test_func)
-        skip = self.options.get('skip')
-        level = self.options.get('level', UNIT)
-        plevel = self.parent.options.get('level', UNIT) if self.parent else UNIT
+        skip = self._options.get('skip')
+        level = self._options.get('level', UNIT)
+        plevel = self._parent._options.get('level', UNIT) if self._parent else UNIT
         skip = skip or level < plevel
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
-            self.stat('run') 
-            self.handle(self.create_log_record(test_func, test_func.__qualname__))
+            self._stat('run') 
+            self.handle(self._create_logrecord(test_func, test_func.__qualname__))
             test_wf = WithFixtures(self, bind_func)
             test_wf(*app_args, **app_kwds)
-        return bind_func if self.options.get('keep') else None
+        return bind_func if self._options.get('keep') else None
 
 
-    def critical(self, *a, **kw):
-        return self(*a, level=CRITICAL, **kw)
+    def critical(self, *a, **k):
+        return self(*a, level=CRITICAL, **k)
 
-    def unit(self, *a, **kw):
-        return self(*a, level=UNIT, **kw)
+    def unit(self, *a, **k):
+        return self(*a, level=UNIT, **k)
 
-    def integration(self, *a, **kw):
-        return self(*a, level=INTEGRATION, **kw)
+    def integration(self, *a, **k):
+        return self(*a, level=INTEGRATION, **k)
 
-    def performance(self, *a, **kw):
-        return self(*a, level=PERFORMANCE, **kw)
+    def performance(self, *a, **k):
+        return self(*a, level=PERFORMANCE, **k)
 
 
     def __call__(self, *fs, **opts):
         """Decorator to define, run and report a test, with one-time options when given. """
         AUTOTEST_INTERNAL = 1
-        if len(fs) == 1 and not opts:               # optimized path for @test sans opts
-            return self.run(*fs)
+        if len(fs) == 1:
+            if not opts:                               # optimized path for @test sans opts
+                return self._run(*fs)
+            else:
+                return self.getChild(**opts)._run(*fs)  # test(f, **opts)
         elif opts and not fs:
-            return self.getChild('', **opts)        # @test(opt=value,...)
-        elif len(fs) == 1:
-            with self.child(**opts) as tmp:
-                f, = fs
-                if isinstance(f, tuple):
-                    return tmp.run(*f)
-                return tmp.run(*fs)                 # @test or test(f, **opts)
-        elif len(fs) > 1:
-            with self.child(**opts) as tmp:
-                for f in fs:                        # test(*suite)
-                    tmp.run(f)
+            return self.getChild(**opts)               # @test(opt=value,...)
         else:
-            return self.child()                     # with test():
+            with self.child(**opts) as tmp:
+                for f in fs:                           # test(*suite)
+                    tmp._run(f)
 
 
-    def log_stats(self):
-        self.handle(self.create_log_record(None, ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
-
-    @contextlib.contextmanager
-    def child(self, name=None, **opts):
-        """ create sub tester with opts """
-        child = self.getChild(name, **opts)
-        yield child
-        child.log_stats()
+    def _log_stats(self):
+        self.handle(self._create_logrecord(None, ', '.join(f'{k}: {v}' for k, v in self._stats.most_common())))
 
 
     def fail(self, *args, **kwds):
-        if not self.options.get('skip', False):
+        if not self._options.get('skip', False):
             args += (kwds,) if kwds else ()
             raise AssertionError(*args)
 
@@ -175,7 +172,7 @@ class Runner:
            That value is used as argument to functions declaring the fixture in their args. """
         assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
         bound_f = bind_1_frame_back(func)
-        self.fixtures[func.__name__] = bound_f
+        self._fixtures[func.__name__] = bound_f
         return bound_f
 
 
@@ -234,9 +231,10 @@ class Runner:
                 return True
             return call_operator
 
+
     @property
     def comp(self):
-        return self.Operator(test=operator.not_, diff=self.options.get('diff'))
+        return self.Operator(test=operator.not_, diff=self._options.get('diff'))
 
     complement = comp
 
@@ -244,15 +242,15 @@ class Runner:
     def __getattr__(self, name):
         """ - test.<fixture>: returns a fixture
             - otherwise delegates to Operator() """
-        if name in self.fixtures:
-            fx = self.fixtures[name]
+        if name in self._fixtures:
+            fx = self._fixtures[name]
             fx_bound = WithFixtures(self, fx)
             if inspect.isgeneratorfunction(fx):
                 return ArgsCollectingContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
                 return ArgsCollectingAsyncContextManager(fx_bound)
             raise ValueError(f"not an (async) generator: {fx}")
-        return getattr(self.Operator(diff=self.options.get('diff')), name)
+        return getattr(self.Operator(diff=self._options.get('diff')), name)
 
 
 self_test = Runner('autotest-self-tests') # separate runner for bootstrapping/self testing
@@ -413,13 +411,13 @@ class WithFixtures:
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
-                return asyncio.run(coro, debug=self.runner.options.get('debug'))
+                return asyncio.run(coro, debug=self.runner._options.get('debug'))
             else:
                 """ we get called by sync code (a decorator during def) which in turn
                     is called from async code. The only way to run this async test
                     is in a new event loop (in another thread) """
                 t = threading.Thread(target=asyncio.run, args=(coro,),
-                        kwargs={'debug': self.runner.options.get('debug')})
+                        kwargs={'debug': self.runner._options.get('debug')})
                 t.start()
                 t.join()
                 return
@@ -436,8 +434,8 @@ class WithFixtures:
             a = () if p.annotation == inspect.Parameter.empty else p.annotation
             assert p.default == inspect.Parameter.empty, f"Use {p.name}:{p.default} instead of {p.name}={p.default}"
             return a if isinstance(a, tuple) else (a,)
-        return [(self.runner.fixtures[name], args(p)) for name, p in inspect.signature(f).parameters.items()
-                if name in self.runner.fixtures and name not in except_for]
+        return [(self.runner._fixtures[name], args(p)) for name, p in inspect.signature(f).parameters.items()
+                if name in self.runner._fixtures and name not in except_for]
 
 
     # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
@@ -468,7 +466,7 @@ class WithFixtures:
 
     async def async_run_with_fixtures(self, *args, **kwargs):
         AUTOTEST_INTERNAL = 1
-        timeout = self.runner.options.get('timeout')
+        timeout = self.runner._options.get('timeout')
         async with contextlib.AsyncExitStack() as contextmgrstack:
             result = await self.async_run_recursively(self.func, contextmgrstack, *args, **kwargs)
             assert inspect.iscoroutine(result)
@@ -683,53 +681,53 @@ def test_testop_has_args():
 with self_test.child() as tst:
     @tst
     def nested_defaults():
-        dflts0 = tst.options
+        dflts0 = tst._options
         assert not dflts0['skip']
         with tst.child(skip=True) as tstk:
-            dflts1 = tstk.options
+            dflts1 = tstk._options
             assert dflts1['skip']
             @tstk
             def fails_but_is_skipped():
                 tstk.eq(1, 2)
             try:
                 with tstk.child(skip=False) as TeSt:
-                    dflts2 = TeSt.options
+                    dflts2 = TeSt._options
                     assert not dflts2['skip']
                     @TeSt
                     def fails_but_is_not_reported():
                         TeSt.gt(1, 2)
                     tst.fail()
-                assert tstk.options == dflts1
+                assert tstk._options == dflts1
             except AssertionError as e:
                 tstk.eq("('gt', 1, 2)", str(e))
-        assert tst.options == dflts0
+        assert tst._options == dflts0
 
     @tst
     def shorthand_for_new_context_without_options():
         """ Use this for defining new/tmp fixtures. """
         ctx0 = tst
-        with tst() as t: # == self_test.child()
+        with tst.child() as t:
             assert ctx0 != t
-            assert ctx0.fixtures == t.fixtures
-            assert ctx0.options == t.options
+            assert ctx0._fixtures == t._fixtures
+            assert ctx0._options == t._options
             @t.fixture
             def new_one():
                 yield 42
-            assert ctx0.fixtures != t.fixtures
-            assert "new_one" in t.fixtures
-            assert "new_one" not in ctx0.fixtures
+            assert ctx0._fixtures != t._fixtures
+            assert "new_one" in t._fixtures
+            assert "new_one" not in ctx0._fixtures
 
 
 @self_test
 def override_fixtures_in_new_context():
-    with self_test() as t:
+    with self_test.child() as t:
         assert self_test != t
         @t.fixture
         def temporary_fixture():
             yield "tmp one"
         with t.temporary_fixture as tf1:
             assert "tmp one" == tf1
-        with self_test():
+        with self_test.child():
             @self_test.fixture
             def temporary_fixture():
                 yield "tmp two"
@@ -772,9 +770,9 @@ def combine_test_with_options():
     trace = []
     @self_test(keep=True, my_opt=42)
     def f0():
-        trace.append(self_test.options.get('my_opt'))
+        trace.append(self_test._options.get('my_opt'))
     def f1(): # ordinary function; the only difference, here(!) is binding
-        trace.append(self_test.options.get('my_opt'))
+        trace.append(self_test._options.get('my_opt'))
     self_test(f0)
     self_test(f0, my_opt=76)
     self_test(f0, f1, my_opt=93)
@@ -791,7 +789,7 @@ def test_calls_other_test():
     def test_a():
         assert 1 == 1
         return True
-    @self_test()
+    @self_test.child()
     def test_b():
         assert test_a()
 
@@ -802,7 +800,7 @@ def test_calls_other_test_with_fixture():
     def test_a(fixture_A):
         assert 42 == fixture_A
         return True
-    @self_test()
+    @self_test.child()
     def test_b():
         assert test_a(fixture_A=42)
 
@@ -1488,7 +1486,7 @@ class testing_levels:
 
 @self_test
 def log_stats(intercept):
-    with self_test() as tst:
+    with self_test.child() as tst:
         @tst
         def one(): pass
         @tst
@@ -1500,4 +1498,4 @@ def log_stats(intercept):
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 81, 'run': 75}, self_test.stats)
+    self_test.eq({'found': 81, 'run': 75}, self_test._stats)
