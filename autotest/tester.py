@@ -39,39 +39,9 @@ PERFORMANCE = logging.INFO
 NOTSET      = logging.NOTSET
 
 
-class Report:
-
-    def __init__(self):
-        self.total = 0
-        self.ran = 0
-        self.reported = 0
-
-    def __call__(self, test, *app_args, **app_kwds):
-        AUTOTEST_INTERNAL = 1
-        self.start(test)
-        try:
-            return test(*app_args, **app_kwds)
-        finally:
-            self.done(self)
-
-    def start(self, test):
-        if test.runner.options.get('report'):
-            self.reported += 1
-
-    def done(self, test):
-        self.ran += 1
-
-    def found(self, context):
-        self.total += 1
-
-    def report(self):
-        pass
-
-
 defaults = dict(
             skip      = not is_main_process or __name__ == '__mp_main__',
             keep      = False,      # Ditch test functions after running
-            report    = True,       # Do reporting when starting a test.
             timeout   = 2,          # asyncio task timeout
             debug     = True,       # use debug for asyncio.run
             diff      = None,       # set a function for printing diffs on failures
@@ -81,10 +51,9 @@ defaults = dict(
 class Runner:
     """ Main tool for running tests across modules and programs. """
 
-    def __init__(self, name=None, parent=None, reporter=None, **opts):
+    def __init__(self, name=None, parent=None, **opts):
         self._handlers = []
         self.parent = parent
-        self.report = reporter if reporter else Report()
         if parent:
             self.name = parent.name + '.' + name if name else parent.name
             self.fixtures = parent.fixtures.new_child()
@@ -93,10 +62,16 @@ class Runner:
             self.name = name
             self.fixtures = collections.ChainMap()
             self.options = collections.ChainMap(opts, defaults)
+        self.stats = collections.Counter()
+
+    def stat(self, key):
+        self.stats[key] += 1
+        if p := self.parent:
+            p.stat(key)
 
     def getChild(self, name, **opts):
         """ modelled after logging.getChild """
-        return Runner(parent=self, name=name, reporter=self.report, **opts)
+        return Runner(parent=self, name=name, **opts)
 
     def get_handlers(self):
         return self._handlers
@@ -113,30 +88,34 @@ class Runner:
         else:
             logging.getLogger().handle(record)
 
+    def create_log_record(self, f, msg):
+        return logging.LogRecord(
+            self.name,                         # name of logger
+            self.options.get('level'),                  # log level: might depend on test type (unit, integration, performance, etc)
+            f.__code__.co_filename if f else None,    # source file where test is
+            f.__code__.co_firstlineno if f else None, # line where test is
+            msg,       # message
+            (),                                # args (passed to message.format)
+            None,                              # exc_info
+            f.__name__ if f else None,                # name of the function invoking test.<op>
+            None                               # text representation of stack
+            )
+
 
     def run(self, test_func, *app_args, **app_kwds):
         """ Binds f to stack vars and fixtures and runs it immediately. """
         AUTOTEST_INTERNAL = 1
-        self.report.found(self)
+        self.stat('found')
         bind_func = bind_1_frame_back(test_func)
         skip = self.options.get('skip')
         level = self.options.get('level', UNIT)
         plevel = self.parent.options.get('level', UNIT) if self.parent else UNIT
         skip = skip or level < plevel
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
-            wf = WithFixtures(self, bind_func)
-            self.handle(logging.LogRecord(
-                self.name,                         # name of logger
-                logging.CRITICAL,                  # log level: might depend on test type (unit, integration, performance, etc)
-                test_func.__code__.co_filename,    # source file where test is
-                test_func.__code__.co_firstlineno, # line where test is
-                f'{test_func.__qualname__}',       # message
-                (),                                # args (passed to message.format)
-                None,                              # exc_info
-                test_func.__name__,                # name of the function invoking test.<op>
-                None                               # text representation of stack
-                ))
-            self.report(wf, *app_args, **app_kwds)
+            self.stat('run') 
+            self.handle(self.create_log_record(test_func, test_func.__qualname__))
+            test_wf = WithFixtures(self, bind_func)
+            test_wf(*app_args, **app_kwds)
         return bind_func if self.options.get('keep') else None
 
 
@@ -156,26 +135,33 @@ class Runner:
     def __call__(self, *fs, **opts):
         """Decorator to define, run and report a test, with one-time options when given. """
         AUTOTEST_INTERNAL = 1
-        if opts and not fs:
-            return self.getChild('', **opts).run       # @test(opt=value,...)
+        if len(fs) == 1 and not opts:               # optimized path for @test sans opts
+            return self.run(*fs)
+        elif opts and not fs:
+            return self.getChild('', **opts)        # @test(opt=value,...)
         elif len(fs) == 1:
             with self.child(**opts) as tmp:
                 f, = fs
                 if isinstance(f, tuple):
                     return tmp.run(*f)
-                return tmp.run(*fs)           # @test or test(f, **opts)
+                return tmp.run(*fs)                 # @test or test(f, **opts)
         elif len(fs) > 1:
             with self.child(**opts) as tmp:
-                for f in fs:                      # test(*suite)
+                for f in fs:                        # test(*suite)
                     tmp.run(f)
         else:
-            return self.child()                    # with test():
+            return self.child()                     # with test():
 
+
+    def log_stats(self):
+        self.handle(self.create_log_record(None, ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
 
     @contextlib.contextmanager
     def child(self, name=None, **opts):
         """ create sub tester with opts """
-        yield self.getChild('', **opts)
+        child = self.getChild(name, **opts)
+        yield child
+        child.log_stats()
 
 
     def fail(self, *args, **kwds):
@@ -682,7 +668,7 @@ except AssertionError as e:
 @self_test
 def test_testop_has_args():
     try:
-        @self_test(report=False)
+        @self_test
         def nested_test_with_testop():
             x = 42
             y = 67
@@ -694,24 +680,21 @@ def test_testop_has_args():
         self_test.eq("('eq', 42, 67)", str(e))
 
 
-with self_test.child(report=False) as tst:
+with self_test.child() as tst:
     @tst
     def nested_defaults():
         dflts0 = tst.options
         assert not dflts0['skip']
-        assert not dflts0['report']
-        with tst.child(skip=True, report=True) as tstk:
+        with tst.child(skip=True) as tstk:
             dflts1 = tstk.options
             assert dflts1['skip']
-            assert dflts1['report']
             @tstk
             def fails_but_is_skipped():
                 tstk.eq(1, 2)
             try:
-                with tstk.child(skip=False, report=False) as TeSt:
+                with tstk.child(skip=False) as TeSt:
                     dflts2 = TeSt.options
                     assert not dflts2['skip']
-                    assert not dflts2['report']
                     @TeSt
                     def fails_but_is_not_reported():
                         TeSt.gt(1, 2)
@@ -728,7 +711,6 @@ with self_test.child(report=False) as tst:
         with tst() as t: # == self_test.child()
             assert ctx0 != t
             assert ctx0.fixtures == t.fixtures
-            assert ctx0.report == t.report
             assert ctx0.options == t.options
             @t.fixture
             def new_one():
@@ -805,34 +787,34 @@ def combine_test_with_options():
 
 @self_test
 def test_calls_other_test():
-    @self_test(keep=True, report=False)
+    @self_test(keep=True)
     def test_a():
         assert 1 == 1
         return True
-    @self_test(report=False)
+    @self_test()
     def test_b():
         assert test_a()
 
 
 @self_test
 def test_calls_other_test_with_fixture():
-    @self_test(keep=True, report=False)
+    @self_test(keep=True)
     def test_a(fixture_A):
         assert 42 == fixture_A
         return True
-    @self_test(report=False)
+    @self_test()
     def test_b():
         assert test_a(fixture_A=42)
 
 
 @self_test
 def test_calls_other_test_with_fixture_and_more_args():
-    @self_test(keep=True, report=False, skip=True)
+    @self_test(keep=True, skip=True)
     def test_a(fixture_A, value):
         assert 42 == fixture_A
         assert 16 == value
         return True
-    @self_test(report=False)
+    @self_test
     def test_b(fixture_A):
         assert test_a(fixture_A=42, value=16)
 
@@ -849,7 +831,7 @@ def call_test_with_complete_context():
     @self_test(keep=True)
     def a_test():
         assert True
-    assert a_test
+    assert a_test, a_test
     self_test(a_test)
 
 
@@ -1144,7 +1126,7 @@ def bind_test_functions_to_their_fixtures():
     def my_fix():
         yield 34
 
-    @self_test(skip=True, keep=True, report=True)
+    @self_test(skip=True, keep=True)
     def override_fixture_binding_with_kwarg(my_fix):
         assert 34 != my_fix, "should be 34"
         assert 56 == my_fix
@@ -1412,7 +1394,7 @@ class logging_handlers:
             tester.eq(1,1)
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler.<locals>.a_test"
-        self_test.eq(log_msg, f"carl-50-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
+        self_test.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
 
 
     @self_test
@@ -1427,7 +1409,7 @@ class logging_handlers:
         log_msg = s.getvalue()
         self_test.startswith(log_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_propagates.<locals>.my_sub_test"
-        self_test.eq(log_msg, f"main.sub1-50-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
 
 
     @self_test
@@ -1444,23 +1426,27 @@ class logging_handlers:
         sub_msg = sub_s.getvalue()
         self_test.startswith(sub_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_does_not_propagate.<locals>.my_sub_test"
-        self_test.eq(sub_msg, f"main.sub1-50-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
         self_test.eq('', main_msg) # do not duplicate message in parent
 
 
-    @self_test
-    def tester_delegates_to_root_logger():
-        tester = Runner('free')
+    @self_test.fixture
+    def intercept():
         records = []
         root_logger = logging.getLogger()
         root_logger.addFilter(records.append) # intercept only
         try:
-            @tester
-            def my_output_goes_to_root_logger():
-                tester.eq(1,1)
+            yield records
         finally:
             root_logger.removeFilter(records.append)
-        self_test.eq('my_output_goes_to_root_logger', records[0].funcName)
+
+    @self_test
+    def tester_delegates_to_root_logger(intercept):
+        tester = Runner('free')
+        @tester
+        def my_output_goes_to_root_logger():
+            tester.eq(1,1)
+        self_test.eq('my_output_goes_to_root_logger', intercept[0].funcName)
 
 
     @self_test
@@ -1475,7 +1461,7 @@ class logging_handlers:
             pass
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
-        self_test.eq(log_msg, f"esmee-50-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
+        self_test.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
 
 
 class testing_levels:
@@ -1499,5 +1485,19 @@ class testing_levels:
             runs[1] = True
     self_test.eq([True, None], runs)
 
-# TODO
-# how to get the default fixtures in the root?
+
+@self_test
+def log_stats(intercept):
+    with self_test() as tst:
+        @tst
+        def one(): pass
+        @tst
+        def two(): pass
+    tst.eq(3, len(intercept))
+    msg = intercept[2].msg
+    tst.contains(msg, "found: 2, run: 2")
+
+
+@self_test
+def check_stats():
+    self_test.eq({'found': 81, 'run': 75}, self_test.stats)
