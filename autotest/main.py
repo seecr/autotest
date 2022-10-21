@@ -18,6 +18,9 @@ def insert_excepthook(new_hook):
     sys.excepthook = hook
 
 
+# TODO
+# create root Runner, with standard fixtures
+
 
 # TODO default runner could do fancier logging:
     #def __str__(self):

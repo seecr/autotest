@@ -11,24 +11,19 @@
 
 """
 
-import inspect
-import traceback
-import types
-import pathlib
-import tempfile
-import sys
-import operator
-import contextlib
-import functools
-import asyncio
-import os
-import difflib
-import collections
-import pprint
-import builtins
-import threading
-import io
-import logging
+import inspect          # for recognizing functions, generators etc
+import types            # for creating Function object with extended bindings
+import sys              # exc_info and builtins
+import contextlib       # fixtures are contexts
+import functools        # wrapping function in async generator
+import asyncio          # support for async test and fixtures
+import difflib          # show diffs on failed tests with two args
+import pprint           # show diffs on failed tests with two args
+import collections      # chain maps for hierarchical Runners
+import operator         # operators for asserting
+import builtins         # operators for asserting
+import threading        # run nested async tests in thread
+import logging          # output to logger
 
 
 from utils import is_main_process
@@ -37,20 +32,19 @@ from utils import is_main_process
 __all__ = ['test', 'Runner']
 
 
-CRITICAL = logging.CRITICAL
-UNIT = logging.ERROR
+CRITICAL    = logging.CRITICAL
+UNIT        = logging.ERROR
 INTEGRATION = logging.WARNING
 PERFORMANCE = logging.INFO
-NOTSET = logging.NOTSET
+NOTSET      = logging.NOTSET
 
 
 class Report:
 
-    def __init__(self, handlers=()):
+    def __init__(self):
         self.total = 0
         self.ran = 0
         self.reported = 0
-        self.handlers = handlers
 
     def __call__(self, test, *app_args, **app_kwds):
         AUTOTEST_INTERNAL = 1
@@ -75,54 +69,49 @@ class Report:
 
 
 defaults = dict(
-            skip    = not is_main_process or __name__ == '__mp_main__',
-            keep    = False,      # Ditch test functions after running, or keep them in their namespace.
-            report  = True,       # Do reporting when starting a test.
-            gather  = False,      # Gather tests, use gathered() to get them
-            timeout = 2,          # asyncio task timeout
-            coverage= False,      # invoke trace module
-            debug   = True,       # use debug for asyncio.run
-            diff    = None,       # set a function for printing diffs on failures
-            level   = UNIT,       # default test level
+            skip      = not is_main_process or __name__ == '__mp_main__',
+            keep      = False,      # Ditch test functions after running
+            report    = True,       # Do reporting when starting a test.
+            timeout   = 2,          # asyncio task timeout
+            debug     = True,       # use debug for asyncio.run
+            diff      = None,       # set a function for printing diffs on failures
+            level     = UNIT,       # default test level
         )
 
 class Runner:
     """ Main tool for running tests across modules and programs. """
 
-    def __init__(self, name=None, parent=None, reporter=None, gathered=None, **opts):
+    def __init__(self, name=None, parent=None, reporter=None, **opts):
         self._handlers = []
         self.parent = parent
-        self.name = parent.name if name is None else name # support anoymous subrunners
-        self.report = reporter if reporter else Report(self.get_handlers())
+        self.report = reporter if reporter else Report()
         if parent:
+            self.name = parent.name + '.' + name if name else parent.name
             self.fixtures = parent.fixtures.new_child()
             self.options = parent.options.new_child(m=opts)
         else:
+            self.name = name
             self.fixtures = collections.ChainMap()
             self.options = collections.ChainMap(opts, defaults)
-        self.gathered = gathered if gathered else []
-
-    def clone(self, opts, gathered=None, name=None):
-        return Runner(parent=self, name=name, reporter=self.report, 
-                gathered=self.gathered if gathered is None else gathered, **opts)
 
     def getChild(self, name, **opts):
         """ modelled after logging.getChild """
-        return self.clone(opts, name=self.name + '.' + name)
+        return Runner(parent=self, name=name, reporter=self.report, **opts)
 
     def get_handlers(self):
-        if not self._handlers:
-            self._handlers = [logging.getLogger()] # logger is handler too
         return self._handlers
 
     def addHandler(self, handler):
         self.get_handlers().append(handler)
 
     def handle(self, record):
-        for h in self.get_handlers():
-            h.handle(record)
-        if self.parent:
+        if handlers := self._handlers:
+            for h in handlers:
+                h.handle(record)
+        elif self.parent:
             self.parent.handle(record)
+        else:
+            logging.getLogger().handle(record)
 
 
     def run(self, test_func, *app_args, **app_kwds):
@@ -148,8 +137,6 @@ class Runner:
                 None                               # text representation of stack
                 ))
             self.report(wf, *app_args, **app_kwds)
-        if self.options.get('gather'):
-            self.gathered.append(bind_func)
         return bind_func if self.options.get('keep') else None
 
 
@@ -170,30 +157,25 @@ class Runner:
         """Decorator to define, run and report a test, with one-time options when given. """
         AUTOTEST_INTERNAL = 1
         if opts and not fs:
-            return self.clone(opts).run       # @test(opt=value,...)
+            return self.getChild('', **opts).run       # @test(opt=value,...)
         elif len(fs) == 1:
-            with self.opts(**opts) as tmp:
+            with self.child(**opts) as tmp:
                 f, = fs
                 if isinstance(f, tuple):
                     return tmp.run(*f)
                 return tmp.run(*fs)           # @test or test(f, **opts)
         elif len(fs) > 1:
-            with self.opts(**opts) as tmp:
+            with self.child(**opts) as tmp:
                 for f in fs:                      # test(*suite)
                     tmp.run(f)
         else:
-            return self.opts()                    # with test():
+            return self.child()                    # with test():
 
 
     @contextlib.contextmanager
-    def opts(self, gathered=None, name=None, **opts):
+    def child(self, name=None, **opts):
         """ create sub tester with opts """
-        yield self.clone(opts, gathered=gathered)
-
-
-    def gather(self, gather=True, **opts):
-        """ create sub tester which gathers tests with opts """
-        return self.opts(gathered=[], gather=gather, **opts)
+        yield self.getChild('', **opts)
 
 
     def fail(self, *args, **kwds):
@@ -640,45 +622,6 @@ class async_fixtures:
         self_test.eq(252, fixture_C)
 
 
-def tmp_path(name=None):
-    with tempfile.TemporaryDirectory() as p:
-        p = pathlib.Path(p)
-        if name:
-            yield p/name
-        else:
-            yield p
-self_test.fixture(tmp_path)
-
-
-class tmp_files:
-
-    path = None
-
-    @self_test
-    def temp_sync(tmp_path):
-        assert tmp_path.exists()
-
-    @self_test
-    def temp_file_removal(tmp_path):
-        global path
-        path = tmp_path / 'aap'
-        path.write_text("hello")
-
-    @self_test
-    def temp_file_gone():
-        assert not path.exists()
-
-    @self_test
-    async def temp_async(tmp_path):
-        assert tmp_path.exists()
-
-    @self_test
-    def temp_dir_with_file(tmp_path:'aap'):
-        assert str(tmp_path).endswith('/aap')
-        tmp_path.write_text('hi monkey')
-        assert tmp_path.exists()
-
-
 @self_test
 def new_assert():
     assert self_test.eq(1, 1)
@@ -751,13 +694,13 @@ def test_testop_has_args():
         self_test.eq("('eq', 42, 67)", str(e))
 
 
-with self_test.opts(report=False) as tst:
+with self_test.child(report=False) as tst:
     @tst
     def nested_defaults():
         dflts0 = tst.options
         assert not dflts0['skip']
         assert not dflts0['report']
-        with tst.opts(skip=True, report=True) as tstk:
+        with tst.child(skip=True, report=True) as tstk:
             dflts1 = tstk.options
             assert dflts1['skip']
             assert dflts1['report']
@@ -765,7 +708,7 @@ with self_test.opts(report=False) as tst:
             def fails_but_is_skipped():
                 tstk.eq(1, 2)
             try:
-                with tstk.opts(skip=False, report=False) as TeSt:
+                with tstk.child(skip=False, report=False) as TeSt:
                     dflts2 = TeSt.options
                     assert not dflts2['skip']
                     assert not dflts2['report']
@@ -782,7 +725,7 @@ with self_test.opts(report=False) as tst:
     def shorthand_for_new_context_without_options():
         """ Use this for defining new/tmp fixtures. """
         ctx0 = tst
-        with tst() as t: # == self_test.opts()
+        with tst() as t: # == self_test.child()
             assert ctx0 != t
             assert ctx0.fixtures == t.fixtures
             assert ctx0.report == t.report
@@ -860,74 +803,6 @@ def combine_test_with_options():
 
 
 
-#@self_test
-def gather_tests():
-    with self_test.gather() as suite:
-
-        @suite.fixture
-        def a_fixture():
-            yield 16
-
-        @suite(skip=True)
-        def t0(a_fixture): return f'this is t0, with {a_fixture}'
-
-        with suite.gather() as subsuite0:
-            @subsuite0
-            def sub0(): return 78
-
-        with suite.gather(report=True) as subsuite1:
-            @subsuite1
-            def sub1(): return 56
-
-        @suite
-        def t1(a_fixture): return f'this is t1, with {a_fixture}'
-
-        @suite(gather=False)
-        def t2(): pass
-
-    self_test.eq(1, len(subsuite0.gathered))
-    self_test.eq(78, subsuite0.gathered[0]())
-    self_test.eq(1, len(subsuite1.gathered))
-    self_test.eq(56, subsuite1.gathered[0]())
-    # self_test.eq(2, len(suite.gathered))  #TODO subsuite not part of super suite temporarily
-    # NB: running test function without context (reporting etc):
-    # self_test.eq('this is t0, with 42', suite.gathered[0](a_fixture=42))   # IDEM
-    """ deprecated; we could reintroduce 'bind' option to allow this
-    self_test.eq('this is t1, with 16', suite[1]())
-    """
-    self_test.eq(1, len(subsuite0.gathered))
-    self_test.eq(1, len(subsuite1.gathered))
-    # self_test.eq(2, len(suite.gathered))  # IDEM
-
-#@self_test    TODO properly (re) implement suites
-def run_suite():
-    trace = []
-    with self_test.gather(keep=True) as suite:
-        @self_test.fixture
-        def a():
-            yield 42
-        @self_test
-        def a1(a):
-            assert 0 == a % 42
-            trace.append(f"a1:{a}")
-        @self_test
-        def a2(a):
-            assert 0 == a % 42
-            trace.append(f"a2:{a}")
-    # run in new context
-    with self_test():
-        @self_test.fixture
-        def a():
-            yield 84
-        # different ways to run a test function:
-        a1(126)            # NB: no context at all, not reported
-        self_test(a1)
-        self_test(suite[0])
-        self_test(*suite)
-        self_test(a1, a2)
-        # just to be sure
-        self_test.eq(["a1:42", "a2:42", "a1:126", "a1:84", "a1:84", "a1:84", "a2:84", "a1:84", "a2:84"], trace)
-
 @self_test
 def test_calls_other_test():
     @self_test(keep=True, report=False)
@@ -976,38 +851,6 @@ def call_test_with_complete_context():
         assert True
     assert a_test
     self_test(a_test)
-
-
-def capture(name):
-    """ captures output from child processes as well """
-    org_stream = getattr(sys, name)
-    org_fd = org_stream.fileno()
-    org_fd_backup = os.dup(org_fd)
-    replacement = tempfile.TemporaryFile(mode="w+t", buffering=1)
-    os.dup2(replacement.fileno(), org_fd)
-    setattr(sys, name, replacement)
-    def getvalue():
-        replacement.flush()
-        replacement.seek(0)
-        return replacement.read()
-    replacement.getvalue = getvalue
-    try:
-        yield replacement
-    finally:
-        os.dup2(org_fd_backup, org_fd)
-        setattr(sys, name, org_stream)
-
-
-# do not use @self_test.fixture as we need to install this twice
-def stdout():
-    yield from capture('stdout')
-self_test.fixture(stdout)
-
-
-# do not use @test.fixture as we need to install this twice
-def stderr():
-    yield from capture('stderr')
-self_test.fixture(stderr)
 
 
 @self_test
@@ -1072,17 +915,6 @@ def assert_raises_specific_message():
         assert "should raise RuntimeError with message 'hey woman!'" == str(e)
 
 
-
-def import_syntax_error():
-    with self_test.tmp_path as p:
-        try:
-            sys.path.append(str(p))
-            (p/'my_sub_module_syntax_error.py').write_text('syntax error')
-            import my_sub_module_syntax_error
-        finally:
-            sys.path.remove(str(p))
-
-
 def is_builtin(f):
     if m := inspect.getmodule(f.f_code):
         return m.__name__ in sys.builtin_module_names
@@ -1093,16 +925,10 @@ def is_internal(frame):
            '<frozen importlib' in nm or \
            is_builtin(frame)   # TODO testme
 
-#@self_test
-def guess_module():
-    def f():
-        pass
-    self_test.eq('tester', inspect.getmodule(f).__name__)
-    self_test.eq('tester', inspect.getmodule(f.__code__).__name__)
-
 
 def bind_names(bindings, names, frame):
     """ find names in locals on the stack and binds them """
+    # TODO restrict this a bit; now you can poke anywhere
     if not frame or not names:
         return bindings
     if not is_internal(frame):
@@ -1232,14 +1058,6 @@ def use_fixtures_as_context():
         assert 84 == b
     with self_test.fixture_C as c:
         assert 252 == c
-    with self_test.stdout as s:
-        print("hello!")
-        assert "hello!\n" == s.getvalue()
-    keep = []
-    with self_test.tmp_path as p:
-        keep.append(p)
-        (p / "f").write_text("contents")
-    assert not keep[0].exists()
     # it is possible to supply additional args when used as context
     with self_test.fixture_D as d: # only fixture as arg
         assert 10 == d
@@ -1247,12 +1065,6 @@ def use_fixtures_as_context():
     #    assert 10 == d
     with self_test.fixture_D(16) as d: # fixture arg + addtional arg
         assert 16 == d
-
-
-# with self_test.<fixture> does not need @test to run 'in'
-with self_test.tmp_path as p:
-    assert p.exists()
-assert not p.exists()
 
 
 @self_test
@@ -1353,7 +1165,7 @@ def bind_test_functions_to_their_fixtures():
         return my_fix
 
     # general way to rerun a test with other fixtures:
-    with self_test.opts() as t:
+    with self_test.child() as t:
         @t.fixture
         def my_fix():
             yield 89
@@ -1388,7 +1200,7 @@ def bind_test_functions_to_their_fixtures():
         assert 34 == bound_fixture_acces_class_locals(78)
 
     """ deprecated
-    with self_test.opts(keep=True):
+    with self_test.child(keep=True):
 
         @self_test
         def bound_by_default(my_fix):
@@ -1530,16 +1342,9 @@ def use_builtin():
     self_test.hasattr([], 'append')
 
 
-
-
-@self_test.fixture
-async def slow_callback_duration(s):
-    asyncio.get_running_loop().slow_callback_duration = s
-    yield
-
-
 def any(_): # name is included in diffs
     return True
+
 
 class wildcard:
     def __init__(self, f=any):
@@ -1579,13 +1384,20 @@ class nested_async_tests:
     self_test.all(done)
 
 
+@self_test.fixture
+def stringio_handler():
+    import io
+    s = io.StringIO()
+    h = logging.StreamHandler(s)
+    h.setFormatter(logging.Formatter(fmt="{name}-{levelno}-{pathname}-{lineno}-{message}-{exc_info}-{funcName}-{stack_info}", style='{'))
+    yield s, h
+
+
 class logging_handlers:
 
     @self_test.fixture
-    def logging_runner(name='main'):
-        s = io.StringIO()
-        myhandler = logging.StreamHandler(s)
-        myhandler.setFormatter(logging.Formatter(fmt="{name}-{levelno}-{pathname}-{lineno}-{message}-{exc_info}-{funcName}-{stack_info}", style='{'))
+    def logging_runner(stringio_handler, name='main'):
+        s, myhandler = stringio_handler
         tester = Runner(name)
         tester.addHandler(myhandler)
         yield tester, s
@@ -1604,7 +1416,8 @@ class logging_handlers:
 
 
     @self_test
-    def sub_tester(logging_runner:'main'):
+    def sub_tester_propagates(logging_runner:'main'):
+        """ propagate to parent """
         main, s = logging_runner
         sub = main.getChild('sub1')
         _line_ = inspect.currentframe().f_lineno
@@ -1613,8 +1426,41 @@ class logging_handlers:
             sub.eq(1,1)
         log_msg = s.getvalue()
         self_test.startswith(log_msg, f"main.sub1-")
-        qname = "logging_handlers.sub_tester.<locals>.my_sub_test"
+        qname = "logging_handlers.sub_tester_propagates.<locals>.my_sub_test"
         self_test.eq(log_msg, f"main.sub1-50-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+
+
+    @self_test
+    def sub_tester_does_not_propagate(stringio_handler, logging_runner:'main'):
+        main, main_s = logging_runner
+        sub_s, subhandler = stringio_handler
+        sub = main.getChild('sub1')
+        sub.addHandler(subhandler)
+        _line_ = inspect.currentframe().f_lineno
+        @sub
+        def my_sub_test():
+            sub.eq(1,1)
+        main_msg = main_s.getvalue()
+        sub_msg = sub_s.getvalue()
+        self_test.startswith(sub_msg, f"main.sub1-")
+        qname = "logging_handlers.sub_tester_does_not_propagate.<locals>.my_sub_test"
+        self_test.eq(sub_msg, f"main.sub1-50-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq('', main_msg) # do not duplicate message in parent
+
+
+    @self_test
+    def tester_delegates_to_root_logger():
+        tester = Runner('free')
+        records = []
+        root_logger = logging.getLogger()
+        root_logger.addFilter(records.append) # intercept only
+        try:
+            @tester
+            def my_output_goes_to_root_logger():
+                tester.eq(1,1)
+        finally:
+            root_logger.removeFilter(records.append)
+        self_test.eq('my_output_goes_to_root_logger', records[0].funcName)
 
 
     @self_test
@@ -1634,19 +1480,17 @@ class logging_handlers:
 
 class testing_levels:
     runs = [None, None]
-    with self_test.opts('tst', level=CRITICAL) as tst:
-        assert tst.options['level'] == CRITICAL
+    with self_test.child('tst', level=CRITICAL) as tst:
         @tst.critical
         def a_critial_test_always_runs():
             runs[0] = True
-        assert tst.options['level'] == CRITICAL
         @tst.unit
         def a_unit_test_often_runs():
             runs[1] = True
     self_test.eq([True, None], runs)
 
     runs = [None, None]
-    with self_test.opts(level=INTEGRATION) as tst:
+    with self_test.child(level=INTEGRATION) as tst:
         @tst.integration
         def a_integration_test_sometimes_runs():
             runs[0] = True
@@ -1655,3 +1499,5 @@ class testing_levels:
             runs[1] = True
     self_test.eq([True, None], runs)
 
+# TODO
+# how to get the default fixtures in the root?
