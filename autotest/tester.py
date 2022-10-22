@@ -52,33 +52,25 @@ defaults = dict(
 class Runner: # aka Tester
     """ Main tool for running tests across modules and programs. """
 
-    def __init__(self, name=None, parent=None, **opts):
-        self._parent = parent
-        if parent:
-            self._name = parent._name + '.' + name if name else parent._name
-            self._fixtures = parent._fixtures.new_child()
-            self._options = parent._options.new_child(m=opts)
-        else:
-            self._name = name
-            self._fixtures = collections.ChainMap()
-            self._options = collections.ChainMap(opts, defaults)
-        self._stats = collections.Counter()
-        self._loghandlers = []
+    def __call__(self, *functions, **options):
+        """Runs tests, with options; usefull as decorator. """
+        AUTOTEST_INTERNAL = 1
+        if functions and options:
+            return self(**options)(*functions)
+        if options:
+            return self.getChild(**options)
+        for f in functions:
+            result = self._run(f)
+        return result
 
 
-    def _stat(self, key):
-        self._stats[key] += 1
-        if p := self._parent:
-            p._stat(key)
-
-
-    def getChild(self, *a, **k):
-        return Runner(parent=self, *a, **k)
+    def getChild(self, *_, **__):
+        return Runner(*_, parent=self, **__)
 
 
     @contextlib.contextmanager
-    def child(self, *a, **k):
-        child = self.getChild(*a, **k)
+    def child(self, *_, **__):
+        child = self.getChild(*_, **__)
         yield child
         child._log_stats()
 
@@ -95,6 +87,83 @@ class Runner: # aka Tester
             self._parent.handle(logrecord)
         else:
             logging.getLogger().handle(logrecord)
+
+
+    def critical(self, *_, **__):
+        return self(*_, level=CRITICAL, **__)
+
+    def unit(self, *_, **__):
+        return self(*_, level=UNIT, **__)
+
+    def integration(self, *_, **__):
+        return self(*_, level=INTEGRATION, **__)
+
+    def performance(self, *_, **__):
+        return self(*_, level=PERFORMANCE, **__)
+
+
+    def fail(self, *args, **kwds):
+        args += (kwds,) if kwds else ()
+        raise AssertionError(*args)
+
+
+    @property
+    def comp(self):
+        return self.Operator(test=operator.not_, diff=self._options.get('diff'))
+
+    complement = comp
+
+
+    def fixture(self, func):
+        """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
+           That value is used as argument to functions declaring the fixture in their args. """
+        assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
+        bound_f = bind_1_frame_back(func)
+        self._fixtures[func.__name__] = bound_f
+        return bound_f
+
+
+    def diff(self, a, b):
+        """ Produces diff of textual representation of a and b. """
+        return '\n' + '\n'.join(
+                    difflib.ndiff(
+                        pprint.pformat(a).splitlines(),
+                        pprint.pformat(b).splitlines()))
+
+
+    @staticmethod
+    def diff2(a, b):
+        """ experimental, own formatting more suitable for difflib """
+        import autotest.prrint as prrint # late import so prrint can use autotest itself
+        return '\n' + '\n'.join(
+                    difflib.ndiff(
+                        prrint.format(a).splitlines(),
+                        prrint.format(b).splitlines()))
+
+
+    def prrint(self, a):
+        import autotest.prrint as prrint # late import so prrint can use autotest itself
+        prrint.prrint(a)
+
+
+    def __init__(self, name=None, parent=None, **options):
+        self._parent = parent
+        if parent:
+            self._name = parent._name + '.' + name if name else parent._name
+            self._fixtures = parent._fixtures.new_child()
+            self._options = parent._options.new_child(m=options)
+        else:
+            self._name = name
+            self._fixtures = collections.ChainMap()
+            self._options = collections.ChainMap(options, defaults)
+        self._stats = collections.Counter()
+        self._loghandlers = []
+
+
+    def _stat(self, key):
+        self._stats[key] += 1
+        if p := self._parent:
+            p._stat(key)
 
 
     def _create_logrecord(self, f, msg):
@@ -128,74 +197,8 @@ class Runner: # aka Tester
         return bind_func if self._options.get('keep') else None
 
 
-    def critical(self, *a, **k):
-        return self(*a, level=CRITICAL, **k)
-
-    def unit(self, *a, **k):
-        return self(*a, level=UNIT, **k)
-
-    def integration(self, *a, **k):
-        return self(*a, level=INTEGRATION, **k)
-
-    def performance(self, *a, **k):
-        return self(*a, level=PERFORMANCE, **k)
-
-
-    def __call__(self, *fs, **opts):
-        """Decorator to define, run and report a test, with one-time options when given. """
-        AUTOTEST_INTERNAL = 1
-        if len(fs) == 1:
-            if not opts:                               # optimized path for @test sans opts
-                return self._run(*fs)
-            else:
-                return self.getChild(**opts)._run(*fs)  # test(f, **opts)
-        elif opts and not fs:
-            return self.getChild(**opts)               # @test(opt=value,...)
-        else:
-            with self.child(**opts) as tmp:
-                for f in fs:                           # test(*suite)
-                    tmp._run(f)
-
-
     def _log_stats(self):
         self.handle(self._create_logrecord(None, ', '.join(f'{k}: {v}' for k, v in self._stats.most_common())))
-
-
-    def fail(self, *args, **kwds):
-        if not self._options.get('skip', False):
-            args += (kwds,) if kwds else ()
-            raise AssertionError(*args)
-
-
-    def fixture(self, func):
-        """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
-           That value is used as argument to functions declaring the fixture in their args. """
-        assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
-        bound_f = bind_1_frame_back(func)
-        self._fixtures[func.__name__] = bound_f
-        return bound_f
-
-
-    def diff(self, a, b):
-        """ When str called, produces diff of textual representation of a and b. """
-        return '\n' + '\n'.join(
-                    difflib.ndiff(
-                        pprint.pformat(a).splitlines(),
-                        pprint.pformat(b).splitlines()))
-
-
-    @staticmethod
-    def diff2(a, b):
-        """ experimental, own formatting more suitable for difflib """
-        import autotest.prrint as prrint # late import so prrint can use autotest itself
-        return '\n' + '\n'.join(
-                    difflib.ndiff(
-                        prrint.format(a).splitlines(),
-                        prrint.format(b).splitlines()))
-
-    def prrint(self, a):
-        import autotest.prrint as prrint # late import so prrint can use autotest itself
-        prrint.prrint(a)
 
 
     class Operator:
@@ -230,13 +233,6 @@ class Runner: # aka Tester
                         raise AssertionError(op.__name__, *args)
                 return True
             return call_operator
-
-
-    @property
-    def comp(self):
-        return self.Operator(test=operator.not_, diff=self._options.get('diff'))
-
-    complement = comp
 
 
     def __getattr__(self, name):
@@ -765,7 +761,7 @@ def fixtures_with_combined_args(combine:3):
     self_test.eq(1587.6, combine)
 
 
-#@self_test  # test no longer modifies itself but creates a temporary runner when opts are given
+#@self_test  # test no longer modifies itself but creates a temporary runner when options are given
 def combine_test_with_options():
     trace = []
     @self_test(keep=True, my_opt=42)
@@ -777,8 +773,8 @@ def combine_test_with_options():
     self_test(f0, my_opt=76)
     self_test(f0, f1, my_opt=93)
     assert [None, None, 76, 93, 93] == trace, trace
-    # TODO make opts available in test when specificed in @self_test
-    # (@self_test(**opts) makes a one time anonymous context)
+    # TODO make options available in test when specificed in @self_test
+    # (@self_test(**options) makes a one time anonymous context)
     # maybe an optional argument 'context' which tests can declare??
 
 
