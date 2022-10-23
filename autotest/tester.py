@@ -185,15 +185,19 @@ class Runner: # aka Tester
         """ Binds f to stack vars and fixtures and runs it. """
         AUTOTEST_INTERNAL = 1
         self._stat('found')
-        bound_func = bind_1_frame_back(test_func)
         skip = self._options.get('skip')
         level = self._options.get('level', UNIT)
         plevel = self._parent._options.get('level', UNIT) if self._parent else UNIT
         skip = skip or level < plevel
+        # idea
+        # for hook in self._hooks:
+        #     test_func = hook(self, test_func)
+        #
+        bound_func = bind_1_frame_back(test_func)  # hook 1
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             self._stat('run') 
             self.handle(self._create_logrecord(test_func, test_func.__qualname__))
-            test_wf = WithFixtures(self, bound_func)
+            test_wf = WithFixtures(self, bound_func)  # hook 2
             test_wf(*app_args, **app_kwds)
         return bound_func if self._options.get('keep') else None
 
