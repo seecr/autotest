@@ -105,7 +105,7 @@ def prrint(data):
 
 
 #from autotest import test
-from .tester import Runner, stdout
+from tester import Runner, stdout
 test = Runner()
 test.fixture(stdout)
 

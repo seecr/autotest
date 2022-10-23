@@ -41,11 +41,11 @@ NOTSET      = logging.NOTSET
 
 defaults = dict(
     skip      = not is_main_process or __name__ == '__mp_main__',
-    keep      = False,      # Ditch test functions after running
-    timeout   = 2,          # asyncio task timeout
-    debug     = True,       # use debug for asyncio.run
-    diff      = None,       # set a function for printing diffs on failures
-    level     = UNIT,       # default test level
+    keep      = False,           # Ditch test functions after running
+    timeout   = 2,               # asyncio task timeout
+    debug     = True,            # use debug for asyncio.run
+    format    = pprint.pformat,  # set a function for formatting diffs on failures
+    level     = UNIT,            # default test level
 )
 
 
@@ -103,14 +103,15 @@ class Runner: # aka Tester
 
 
     def fail(self, *args, **kwds):
-        args += (kwds,) if kwds else ()
-        raise AssertionError(*args)
+        raise AssertionError(*args, *(kwds,) if kwds else ())
 
 
     @property
     def comp(self):
-        return self.Operator(test=operator.not_, diff=self._options.get('diff'))
-
+        class Not:
+            def __getattr__(inner, name):
+                return self.__getattr__(name, truth=operator.not_)
+        return Not()
     complement = comp
 
 
@@ -123,22 +124,21 @@ class Runner: # aka Tester
         return bound_f
 
 
-    def diff(self, a, b):
+    def diff(self, a, b, ff=None):
         """ Produces diff of textual representation of a and b. """
+        ff = ff if ff else self._options.get('format')
         return '\n' + '\n'.join(
                     difflib.ndiff(
-                        pprint.pformat(a).splitlines(),
-                        pprint.pformat(b).splitlines()))
+                        format(a).splitlines(),
+                        format(b).splitlines()))
 
 
     @staticmethod
     def diff2(a, b):
-        """ experimental, own formatting more suitable for difflib """
+        """ experimental, own formatting more suitable for difflib
+            deprecated, use option 'format=autotest.pformat' """
         import autotest.prrint as prrint # late import so prrint can use autotest itself
-        return '\n' + '\n'.join(
-                    difflib.ndiff(
-                        prrint.format(a).splitlines(),
-                        prrint.format(b).splitlines()))
+        return Tester.diff(a, b, ff=prrint.format)
 
 
     def prrint(self, a):
@@ -147,6 +147,7 @@ class Runner: # aka Tester
 
 
     def __init__(self, name=None, parent=None, **options):
+        """ Not to be instantiated directly, use autotest.getTester() instead """
         self._parent = parent
         if parent:
             self._name = parent._name + '.' + name if name else parent._name
@@ -181,10 +182,10 @@ class Runner: # aka Tester
 
 
     def _run(self, test_func, *app_args, **app_kwds):
-        """ Binds f to stack vars and fixtures and runs it immediately. """
+        """ Binds f to stack vars and fixtures and runs it. """
         AUTOTEST_INTERNAL = 1
         self._stat('found')
-        bind_func = bind_1_frame_back(test_func)
+        bound_func = bind_1_frame_back(test_func)
         skip = self._options.get('skip')
         level = self._options.get('level', UNIT)
         plevel = self._parent._options.get('level', UNIT) if self._parent else UNIT
@@ -192,61 +193,41 @@ class Runner: # aka Tester
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             self._stat('run') 
             self.handle(self._create_logrecord(test_func, test_func.__qualname__))
-            test_wf = WithFixtures(self, bind_func)
+            test_wf = WithFixtures(self, bound_func)
             test_wf(*app_args, **app_kwds)
-        return bind_func if self._options.get('keep') else None
+        return bound_func if self._options.get('keep') else None
 
 
     def _log_stats(self):
         self.handle(self._create_logrecord(None, ', '.join(f'{k}: {v}' for k, v in self._stats.most_common())))
 
 
-    class Operator:
-        """ Returns an function that:
-            calls an operator from builtin module operator, eg:
-              - test.eq(1,1), test.ne(1,2), etc.
-            or calls a method of the first arg, passing it the rest of the args:
-              - test.startswith("aap", "a")
-            and calls given function (default bool()) on the result
-        """
-        def __init__(self, test=bool, diff=None):
-            self.test = test
-            self.diff = diff
-        def __getattr__(self, opname):
-            def call_operator(*args, diff=None, msg=None):
-                diff = diff or msg
-                AUTOTEST_INTERNAL = 1
-                try:
-                    op = getattr(operator, opname)
-                    actual_args = args
-                except AttributeError:
-                    try:
-                        op = getattr(builtins, opname)
-                        actual_args = args
-                    except AttributeError:
-                        op = getattr(args[0], opname)
-                        actual_args = args[1:]
-                if not self.test(op(*actual_args)):
-                    if diff := diff or self.diff:
-                        raise AssertionError(diff(*args))
-                    else:
-                        raise AssertionError(op.__name__, *args)
-                return True
-            return call_operator
-
-
-    def __getattr__(self, name):
+    def __getattr__(self, name, truth=bool):
         """ - test.<fixture>: returns a fixture
-            - otherwise delegates to Operator() """
-        if name in self._fixtures:
-            fx = self._fixtures[name]
+            - otherwise looks for name in operator, builtins and first arg """
+        AUTOTEST_INTERNAL = 1
+        if fx := self._fixtures.get(name):
             fx_bound = WithFixtures(self, fx)
             if inspect.isgeneratorfunction(fx):
                 return ArgsCollectingContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
                 return ArgsCollectingAsyncContextManager(fx_bound)
             raise ValueError(f"not an (async) generator: {fx}")
-        return getattr(self.Operator(diff=self._options.get('diff')), name)
+        else:
+            def call_operator(*args, diff=None):
+                AUTOTEST_INTERNAL = 1
+                if hasattr(operator, name):
+                    op = getattr(operator, name)
+                elif hasattr(builtins, name):
+                    op = getattr(builtins, name)
+                else:
+                    op = getattr(args[0], name)
+                    args = args[1:]
+                if truth(op(*args)):
+                    return True
+                msg = (diff(*args),) if diff else (op.__name__,) + args
+                raise AssertionError(*msg)
+            return call_operator
 
 
 self_test = Runner('autotest-self-tests') # separate runner for bootstrapping/self testing
@@ -609,7 +590,7 @@ def new_assert():
 
     try:
         self_test.eq(1, 2)
-        self_test.fail(msg="too bad")
+        self_test.fail()
     except AssertionError as e:
         assert ('eq', 1, 2) == e.args, e.args
 
@@ -1064,16 +1045,8 @@ def idea_for_dumb_diffs():
 """ == str(e)
 
 
-    # you can als pass a diff function to self_test.<op>().
-    # diff should accept the args preceeding it
-    # str is called on the result, so you can make it lazy
     try:
-        self_test.eq("aap", "ape", msg=lambda x, y: f"{x} mydiff {y}")
-    except AssertionError as e:
-        assert "aap mydiff ape" == str(e)
-
-    try:
-        self_test.eq(a, b, msg=self_test.diff)
+        self_test.eq(a, b, diff=self_test.diff)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -1092,9 +1065,10 @@ def idea_for_dumb_diffs():
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
     try:
-        self_test.eq(a, b, msg=set.symmetric_difference)
+        self_test.eq(a, b, diff=set.symmetric_difference)
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
+
 
 #@self_test # temp disable bc it cause system installed autotest import via diff2
 def diff2_sorting_including_uncomparables():
