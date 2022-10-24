@@ -12,7 +12,6 @@
 """
 
 import inspect          # for recognizing functions, generators etc
-import types            # for creating Function object with extended bindings
 import sys              # exc_info and builtins
 import contextlib       # fixtures are contexts
 import functools        # wrapping function in async generator
@@ -26,10 +25,11 @@ import threading        # run nested async tests in thread
 import logging          # output to logger
 
 
-from utils import is_main_process
+from utils import is_main_process, frame_to_traceback, iterate, is_internal
+from utils import ContextManagerType, AsyncContextManagerType
 
 
-__all__ = ['test', 'Runner']
+__all__ = ['getTester']
 
 
 CRITICAL    = logging.CRITICAL
@@ -219,6 +219,7 @@ class Runner: # aka Tester
             raise ValueError(f"not an (async) generator: {fx}")
         else:
             def call_operator(*args, diff=None):
+                # test.<operator>(*args)
                 AUTOTEST_INTERNAL = 1
                 if hasattr(operator, name):
                     op = getattr(operator, name)
@@ -235,12 +236,6 @@ class Runner: # aka Tester
 
 
 self_test = Runner('autotest-self-tests') # separate runner for bootstrapping/self testing
-
-
-def iterate(f, v):
-    while v:
-        yield v
-        v = f(v)
 
 
 def filter_traceback(tb):
@@ -293,13 +288,6 @@ def example_test():
     assert not any_number(9,15) == object
 
 
-def _(): yield
-async def _a(): yield
-ContextManagerType = type(contextlib.contextmanager(_)())
-AsyncContextManagerType = type(contextlib.asynccontextmanager(_a)())
-del _, _a
-
-
 class ArgsCollector:
     """ collects args before calling a function: ArgsCollector(f, 1)(2)(3)() calls f(1,2,3) """
     def __init__(self, f, *args, **kwds):
@@ -348,17 +336,6 @@ def asyncio_filtering_exception_handler(loop, context):
     if 'source_traceback' in context:
         context['source_traceback'] = [t for t in context['source_traceback'] if '<frozen ' not in t.filename]
     return loop.default_exception_handler(context)
-
-
-# get the type of Traceback objects
-try: raise Exception
-except Exception as e:
-    Traceback = type(e.__traceback__)
-
-
-def frame_to_traceback(tb_frame, tb_next=None):
-    tb = Traceback(tb_next, tb_frame, tb_frame.f_lasti, tb_frame.f_lineno)
-    return create_traceback(tb_frame.f_back, tb) if tb_frame.f_back else tb
 
 
 """ bootstrapping: test and instal fixture support """
@@ -876,48 +853,7 @@ def assert_raises_specific_message():
         assert "should raise RuntimeError with message 'hey woman!'" == str(e)
 
 
-def is_builtin(f):
-    if m := inspect.getmodule(f.f_code):
-        return m.__name__ in sys.builtin_module_names
-
-def is_internal(frame):
-    nm = frame.f_code.co_filename
-    return 'AUTOTEST_INTERNAL' in frame.f_code.co_varnames or \
-           '<frozen importlib' in nm or \
-           is_builtin(frame)   # TODO testme
-
-
-def bind_names(bindings, names, frame):
-    """ find names in locals on the stack and binds them """
-    # TODO restrict this a bit; now you can poke anywhere
-    if not frame or not names:
-        return bindings
-    if not is_internal(frame):
-        f_locals = frame.f_locals # rather expensive
-        rest = []
-        for name in names:
-            try:
-                bindings[name] = f_locals[name]
-            except KeyError:
-                rest.append(name)
-    else:
-        rest = names
-    return bind_names(bindings, rest, frame.f_back)
-
-
-def bind_1_frame_back(func):
-    """ Binds the unbound vars in func to values found on the stack """
-    func2 = types.FunctionType(
-               func.__code__,                      # code
-               bind_names(                         # globals
-                   func.__globals__.copy(),
-                   func.__code__.co_names,
-                   inspect.currentframe().f_back),
-               func.__name__,                      # name
-               func.__defaults__,                  # default arguments
-               func.__closure__)                   # closure/free vars
-    func2.__annotations__ = func.__annotations__   # annotations not in __init__
-    return func2
+from utils import bind_1_frame_back # redefine placeholder
 
 
 M = 'module scope'
@@ -989,6 +925,15 @@ class X:
     @self_test
     async def coroutines_can_also_see_attrs_from_classed_being_defined(f_A):
         assert v == f_A, f_A
+
+
+class binding_context:
+    a = 42
+    @self_test(keep=True)
+    def one_test():
+        assert a == 42
+    a = 43
+    one_test()
 
 
 @self_test
@@ -1472,4 +1417,4 @@ def log_stats(intercept):
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 81, 'run': 75}, self_test._stats)
+    self_test.eq({'found': 82, 'run': 76}, self_test._stats)
