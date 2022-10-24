@@ -14,7 +14,6 @@
 import inspect          # for recognizing functions, generators etc
 import sys              # exc_info and builtins
 import contextlib       # fixtures are contexts
-import functools        # wrapping function in async generator
 import asyncio          # support for async test and fixtures
 import difflib          # show diffs on failed tests with two args
 import pprint           # show diffs on failed tests with two args
@@ -25,7 +24,7 @@ import threading        # run nested async tests in thread
 import logging          # output to logger
 
 
-from utils import is_main_process, frame_to_traceback, iterate, is_internal
+from utils import is_main_process, frame_to_traceback, iterate, is_internal, ensure_async_generator_func
 from utils import ContextManagerType, AsyncContextManagerType
 
 
@@ -339,18 +338,6 @@ def asyncio_filtering_exception_handler(loop, context):
 
 
 """ bootstrapping: test and instal fixture support """
-
-
-def ensure_async_generator_func(f):
-    if inspect.isasyncgenfunction(f):
-        return f
-    if inspect.isgeneratorfunction(f):
-        @functools.wraps(f)
-        async def wrap(*a, **k):
-            for v in f(*a, **k):
-                yield v
-        return wrap
-    assert False, f"{f} cannot be a async generator."
 
 
 # redefine the placeholder with support for fixtures

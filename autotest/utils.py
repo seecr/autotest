@@ -4,6 +4,7 @@ import contextlib
 import types            # for creating Function object with extended bindings
 import inspect
 import sys
+import functools        # wrapping function in async generator
 
 is_main_process = multiprocessing.current_process().name == "MainProcess"
 
@@ -75,5 +76,17 @@ def is_internal(frame):
     return 'AUTOTEST_INTERNAL' in frame.f_code.co_varnames or \
            '<frozen importlib' in nm or \
            is_builtin(frame)   # TODO testme
+
+
+def ensure_async_generator_func(f):
+    if inspect.isasyncgenfunction(f):
+        return f
+    if inspect.isgeneratorfunction(f):
+        @functools.wraps(f)
+        async def wrap(*a, **k):
+            for v in f(*a, **k):
+                yield v
+        return wrap
+    assert False, f"{f} cannot be a async generator."
 
 
