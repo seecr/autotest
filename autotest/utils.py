@@ -58,7 +58,7 @@ def bind_1_frame_back(func):
                func.__code__,                      # code
                bind_names(                         # globals
                    func.__globals__.copy(),
-                   func.__code__.co_names,
+                   func.__code__.co_names,         # names other than arguments and function locals
                    inspect.currentframe().f_back),
                func.__name__,                      # name
                func.__defaults__,                  # default arguments
@@ -88,5 +88,13 @@ def ensure_async_generator_func(f):
                 yield v
         return wrap
     assert False, f"{f} cannot be a async generator."
+
+
+# using import.import_module in asyncio somehow gives us the frozen tracebacks (which were
+# removed in 2012, but yet showing up again in this case. Let's get rid of them.
+def asyncio_filtering_exception_handler(loop, context):
+    if 'source_traceback' in context:
+        context['source_traceback'] = [t for t in context['source_traceback'] if '<frozen ' not in t.filename]
+    return loop.default_exception_handler(context)
 
 
