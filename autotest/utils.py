@@ -98,3 +98,45 @@ def asyncio_filtering_exception_handler(loop, context):
     return loop.default_exception_handler(context)
 
 
+class ArgsCollector:
+    """ collects args before calling a function: ArgsCollector(f, 1)(2)(3)() calls f(1,2,3) """
+    def __init__(self, f, *args, **kwds):
+        self.func = f
+        self.args = args
+        self.kwds = kwds
+    def __call__(self, *args, **kwds):
+        if not args and not kwds:
+            return self.func(*self.args, **self.kwds)
+        self.args += args
+        self.kwds.update(kwds)
+        return self
+
+
+class ArgsCollectingContextManager(ArgsCollector, ContextManagerType):
+    """ Context manager that accepts additional args everytime it is called.
+        NB: Implementation closely tied to contexlib.py (self.gen)"""
+    def __enter__(self):
+        self.gen = self()
+        return super().__enter__()
+
+
+class ArgsCollectingAsyncContextManager(ArgsCollector, AsyncContextManagerType):
+    async def __aenter__(self):
+        self.gen = self()
+        return await super().__aenter__()
+    @property
+    def __enter__(self):
+        raise Exception(f"Use 'async with' for {self.func}.")
+
+
+#@self_test #TODO
+def extra_args_supplying_contextmanager():
+    def f(a, b, c, *, d, e, f):
+        yield a, b, c, d, e, f
+    c = ArgsCollectingContextManager(f, 'a', d='d')
+    assert isinstance(c, contextlib.AbstractContextManager)
+    c('b', e='e')
+    with c('c', f='f') as v:
+        assert ('a', 'b', 'c', 'd', 'e', 'f') == v, v
+
+

@@ -9,6 +9,8 @@ import sys
 import os
 
 from utils import asyncio_filtering_exception_handler, ensure_async_generator_func
+from utils import bind_1_frame_back # redefine placeholder
+from utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
 # redefine the placeholder with support for fixtures
@@ -20,6 +22,26 @@ class WithFixtures:
         self.runner = runner
         self.func = func
 
+
+    @classmethod
+    def lookup(self, tester, name, **__):
+        if name == 'fixture':
+            def fixture(func):
+                """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
+                   That value is used as argument to functions declaring the fixture in their args. """
+                assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
+                bound_f = bind_1_frame_back(func)
+                tester._fixtures[func.__name__] = bound_f
+                return bound_f
+            return fixture
+        if fx := tester._fixtures.get(name):
+            fx_bound = WithFixtures(tester, fx)
+            if inspect.isgeneratorfunction(fx):
+                return ArgsCollectingContextManager(fx_bound)
+            if inspect.isasyncgenfunction(fx):
+                return ArgsCollectingAsyncContextManager(fx_bound)
+            raise ValueError(f"not an (async) generator: {fx}")
+        raise AttributeError
 
     def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
@@ -381,7 +403,7 @@ def fixtures_tests(self_test):
         def test_a(fixture_A):
             assert 42 == fixture_A
             return True
-        @self_test.child()
+        @self_test
         def test_b():
             assert test_a(fixture_A=42)
 
@@ -409,7 +431,7 @@ def fixtures_tests(self_test):
         a = 'scope:X'
         x = 11
 
-        @self_test(keep=True)
+        #@self_test(keep=True)
         def C(fixture_A):
             a = 'scope:C'
             c = 12
@@ -422,7 +444,7 @@ def fixtures_tests(self_test):
             assert 42 == fixture_A, fixture_A
             return fixture_A
 
-        @self_test(keep=True)
+        #@self_test(keep=True)
         def D(fixture_A, fixture_B):
             a = 'scope:D'
             assert 'scope:D' == a
@@ -441,7 +463,7 @@ def fixtures_tests(self_test):
             b = None
             y = 13
 
-            @self_test
+            #@self_test
             def h(fixture_C):
                 global a, b # avoid binding to a and b in enclosing def
                 assert 'scope:Y' == a, a
@@ -551,10 +573,9 @@ def fixtures_tests(self_test):
             @self_test(keep=True) # skip, need more args
             def bound_fixture_acces_class_locals(my_fix):
                 assert 78 == my_fix
-                global a
-                assert 34 == a
-                return a
-            assert 34 == bound_fixture_acces_class_locals(78)
+                #assert 34 == a
+                #return a
+            #assert 34 == bound_fixture_acces_class_locals(78)
 
         """ deprecated
         with self_test.child(keep=True):

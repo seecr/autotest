@@ -152,10 +152,9 @@ class Runner: # aka Tester
 
 
     def _hooks(self):
-        for h in reversed(self._options.get('hooks', ())):
-            yield h
-        if self._parent:
-            yield from self._parent._hooks()
+        for m in self._options.maps:
+            for hook in reversed(m.get('hooks', ())):
+                yield hook
 
 
     def _stat(self, key):
@@ -186,14 +185,14 @@ class Runner: # aka Tester
         level = self._options.get('level', UNIT)
         plevel = self._parent._options.get('level', UNIT) if self._parent else UNIT
         skip = skip or level < plevel
+        orig_test_func = test_func
         for hook in self._hooks():
             test_func = hook(self, test_func)
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             self._stat('run')
-            self.handle(self._create_logrecord(test_func, test_func.__qualname__))
-            test_wf = WithFixtures(self, test_func)  # hook 2
-            test_wf(*app_args, **app_kwds)
-        return test_func if self._options.get('keep') else None
+            self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
+            test_func(*app_args, **app_kwds)
+        return orig_test_func if self._options.get('keep') else None
 
 
     def _log_stats(self):
@@ -281,48 +280,6 @@ def example_test():
     assert not any_number(9,15) == None
     assert not any_number(9,15) == "A"
     assert not any_number(9,15) == object
-
-
-class ArgsCollector:
-    """ collects args before calling a function: ArgsCollector(f, 1)(2)(3)() calls f(1,2,3) """
-    def __init__(self, f, *args, **kwds):
-        self.func = f
-        self.args = args
-        self.kwds = kwds
-    def __call__(self, *args, **kwds):
-        if not args and not kwds:
-            return self.func(*self.args, **self.kwds)
-        self.args += args
-        self.kwds.update(kwds)
-        return self
-
-
-class ArgsCollectingContextManager(ArgsCollector, ContextManagerType):
-    """ Context manager that accepts additional args everytime it is called.
-        NB: Implementation closely tied to contexlib.py (self.gen)"""
-    def __enter__(self):
-        self.gen = self()
-        return super().__enter__()
-
-
-class ArgsCollectingAsyncContextManager(ArgsCollector, AsyncContextManagerType):
-    async def __aenter__(self):
-        self.gen = self()
-        return await super().__aenter__()
-    @property
-    def __enter__(self):
-        raise Exception(f"Use 'async with' for {self.func}.")
-
-
-@self_test
-def extra_args_supplying_contextmanager():
-    def f(a, b, c, *, d, e, f):
-        yield a, b, c, d, e, f
-    c = ArgsCollectingContextManager(f, 'a', d='d')
-    assert isinstance(c, contextlib.AbstractContextManager)
-    c('b', e='e')
-    with c('c', f='f') as v:
-        assert ('a', 'b', 'c', 'd', 'e', 'f') == v, v
 
 
 @self_test
@@ -451,33 +408,22 @@ async def async_function():
 from fixtures import WithFixtures, fixtures_tests
 
 
-class FixtureLookup:
-    def __call__(self, tester, f):
-        #print("FixtureLookup:", f)
-        return f
-    def fixture(self, tester, func):
-        """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
-           That value is used as argument to functions declaring the fixture in their args. """
-        assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
-        bound_f = bind_1_frame_back(func)
-        tester._fixtures[func.__name__] = bound_f
-        return bound_f
-    def lookup(self, tester, name, **__):
-        if name == 'fixture':
-            return functools.partial(self.fixture, tester)
-        if fx := tester._fixtures.get(name):
-            fx_bound = WithFixtures(tester, fx)
-            if inspect.isgeneratorfunction(fx):
-                return ArgsCollectingContextManager(fx_bound)
-            if inspect.isasyncgenfunction(fx):
-                return ArgsCollectingAsyncContextManager(fx_bound)
-            raise ValueError(f"not an (async) generator: {fx}")
-        raise AttributeError
-
 from utils import bind_1_frame_back # redefine placeholder
+def binder(self, func):
+    return bind_1_frame_back(func)
 self_test2 = self_test.getChild(hooks=(
-    lambda self, func: bind_1_frame_back(func),
-    FixtureLookup()))
+    WithFixtures,
+    binder
+    )
+)
+
+assert len(self_test._options.get('hooks')) == 1
+assert len(self_test2._options.get('hooks')) == 2
+hooks = list(self_test2._hooks())
+assert hooks[0] == binder, hooks[0]
+assert hooks[1] == WithFixtures, hooks[1]
+assert hooks[2].__class__ == OperatorLookup, hooks[2]
+assert len(hooks) == 3
 
 fixtures_tests(self_test2)
 
@@ -584,7 +530,7 @@ class binding_context:
     def one_test():
         assert a == 42
     a = 43
-    one_test()
+    #one_test()
 
 
 @self_test2
