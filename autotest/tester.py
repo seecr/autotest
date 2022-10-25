@@ -21,6 +21,7 @@ import collections      # chain maps for hierarchical Runners and Counter
 import operator         # operators for asserting
 import builtins         # operators for asserting
 import logging          # output to logger
+import functools
 
 
 from utils import is_main_process, frame_to_traceback, iterate, is_internal, ensure_async_generator_func
@@ -113,15 +114,6 @@ class Runner: # aka Tester
     complement = comp
 
 
-    def fixture(self, func):
-        """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
-           That value is used as argument to functions declaring the fixture in their args. """
-        assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
-        bound_f = bind_1_frame_back(func)
-        self._fixtures[func.__name__] = bound_f
-        return bound_f
-
-
     def diff(self, a, b, ff=None):
         """ Produces diff of textual representation of a and b. """
         ff = ff if ff else self._options.get('format')
@@ -159,6 +151,13 @@ class Runner: # aka Tester
         self._loghandlers = []
 
 
+    def _hooks(self):
+        for h in reversed(self._options.get('hooks', ())):
+            yield h
+        if self._parent:
+            yield from self._parent._hooks()
+
+
     def _stat(self, key):
         self._stats[key] += 1
         if p := self._parent:
@@ -187,17 +186,14 @@ class Runner: # aka Tester
         level = self._options.get('level', UNIT)
         plevel = self._parent._options.get('level', UNIT) if self._parent else UNIT
         skip = skip or level < plevel
-        # idea
-        # for hook in self._hooks:
-        #     test_func = hook(self, test_func)
-        #
-        bound_func = bind_1_frame_back(test_func)  # hook 1
+        for hook in self._hooks():
+            test_func = hook(self, test_func)
         if inspect.isfunction(skip) and not skip(test_func) or not skip:
             self._stat('run')
             self.handle(self._create_logrecord(test_func, test_func.__qualname__))
-            test_wf = WithFixtures(self, bound_func)  # hook 2
+            test_wf = WithFixtures(self, test_func)  # hook 2
             test_wf(*app_args, **app_kwds)
-        return bound_func if self._options.get('keep') else None
+        return test_func if self._options.get('keep') else None
 
 
     def _log_stats(self):
@@ -205,36 +201,36 @@ class Runner: # aka Tester
 
 
     def __getattr__(self, name, truth=bool):
-        """ - test.<fixture>: returns a fixture
-            - otherwise looks for name in operator, builtins and first arg """
-        AUTOTEST_INTERNAL = 1
-        if fx := self._fixtures.get(name):
-            fx_bound = WithFixtures(self, fx)
-            if inspect.isgeneratorfunction(fx):
-                return ArgsCollectingContextManager(fx_bound)
-            if inspect.isasyncgenfunction(fx):
-                return ArgsCollectingAsyncContextManager(fx_bound)
-            raise ValueError(f"not an (async) generator: {fx}")
-        else:
-            def call_operator(*args, diff=None):
-                # test.<operator>(*args)
-                AUTOTEST_INTERNAL = 1
-                if hasattr(operator, name):
-                    op = getattr(operator, name)
-                elif hasattr(builtins, name):
-                    op = getattr(builtins, name)
-                else:
-                    op = getattr(args[0], name)
-                    args = args[1:]
-                if truth(op(*args)):
-                    return True
-                msg = (diff(*args),) if diff else (op.__name__,) + args
-                raise AssertionError(*msg)
-            return call_operator
+        for hook in self._hooks():
+            try:
+                return hook.lookup(self, name, truth=truth)
+            except AttributeError:
+                pass
 
 
-self_test = Runner('autotest-self-tests') # separate runner for bootstrapping/self testing
+class OperatorLookup:
+    def __call__(self, tester, f):
+        return f
+    def lookup(self, runner, name, truth=bool):
+        def call_operator(*args, diff=None):
+            # test.<operator>(*args)
+            AUTOTEST_INTERNAL = 1
+            if hasattr(operator, name):
+                op = getattr(operator, name)
+            elif hasattr(builtins, name):
+                op = getattr(builtins, name)
+            else:
+                op = getattr(args[0], name)
+                args = args[1:]
+            if truth(op(*args)):
+                return True
+            msg = (diff(*args),) if diff else (op.__name__,) + args
+            raise AssertionError(*msg)
+        return call_operator
 
+
+self_test = Runner('autotest-self-tests',
+        hooks=(OperatorLookup(),)) # separate runner for bootstrapping/self testing
 
 def filter_traceback(tb):
     """ Bootstrapping, placeholder, overwritten later """
@@ -401,46 +397,6 @@ def test_testop_has_args():
         self_test.eq("('eq', 42, 67)", str(e))
 
 
-with self_test.child() as tst:
-    @tst
-    def nested_defaults():
-        dflts0 = tst._options
-        assert not dflts0['skip']
-        with tst.child(skip=True) as tstk:
-            dflts1 = tstk._options
-            assert dflts1['skip']
-            @tstk
-            def fails_but_is_skipped():
-                tstk.eq(1, 2)
-            try:
-                with tstk.child(skip=False) as TeSt:
-                    dflts2 = TeSt._options
-                    assert not dflts2['skip']
-                    @TeSt
-                    def fails_but_is_not_reported():
-                        TeSt.gt(1, 2)
-                    tst.fail()
-                assert tstk._options == dflts1
-            except AssertionError as e:
-                tstk.eq("('gt', 1, 2)", str(e))
-        assert tst._options == dflts0
-
-    @tst
-    def shorthand_for_new_context_without_options():
-        """ Use this for defining new/tmp fixtures. """
-        ctx0 = tst
-        with tst.child() as t:
-            assert ctx0 != t
-            assert ctx0._fixtures == t._fixtures
-            assert ctx0._options == t._options
-            @t.fixture
-            def new_one():
-                yield 42
-            assert ctx0._fixtures != t._fixtures
-            assert "new_one" in t._fixtures
-            assert "new_one" not in ctx0._fixtures
-
-
 #@self_test  # test no longer modifies itself but creates a temporary runner when options are given
 def combine_test_with_options():
     trace = []
@@ -492,6 +448,80 @@ async def async_function():
     assert True
 
 
+from fixtures import WithFixtures, fixtures_tests
+
+
+class FixtureLookup:
+    def __call__(self, tester, f):
+        #print("FixtureLookup:", f)
+        return f
+    def fixture(self, tester, func):
+        """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
+           That value is used as argument to functions declaring the fixture in their args. """
+        assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
+        bound_f = bind_1_frame_back(func)
+        tester._fixtures[func.__name__] = bound_f
+        return bound_f
+    def lookup(self, tester, name, **__):
+        if name == 'fixture':
+            return functools.partial(self.fixture, tester)
+        if fx := tester._fixtures.get(name):
+            fx_bound = WithFixtures(tester, fx)
+            if inspect.isgeneratorfunction(fx):
+                return ArgsCollectingContextManager(fx_bound)
+            if inspect.isasyncgenfunction(fx):
+                return ArgsCollectingAsyncContextManager(fx_bound)
+            raise ValueError(f"not an (async) generator: {fx}")
+        raise AttributeError
+
+from utils import bind_1_frame_back # redefine placeholder
+self_test2 = self_test.getChild(hooks=(
+    lambda self, func: bind_1_frame_back(func),
+    FixtureLookup()))
+
+fixtures_tests(self_test2)
+
+
+with self_test2.child() as tst:
+    @tst
+    def nested_defaults():
+        dflts0 = tst._options
+        assert not dflts0['skip']
+        with tst.child(skip=True) as tstk:
+            dflts1 = tstk._options
+            assert dflts1['skip']
+            @tstk
+            def fails_but_is_skipped():
+                tstk.eq(1, 2)
+            try:
+                with tstk.child(skip=False) as TeSt:
+                    dflts2 = TeSt._options
+                    assert not dflts2['skip']
+                    @TeSt
+                    def fails_but_is_not_reported():
+                        TeSt.gt(1, 2)
+                    tst.fail()
+                assert tstk._options == dflts1
+            except AssertionError as e:
+                tstk.eq("('gt', 1, 2)", str(e))
+        assert tst._options == dflts0
+
+    @tst
+    def shorthand_for_new_context_without_options():
+        """ Use this for defining new/tmp fixtures. """
+        ctx0 = tst
+        with tst.child() as t:
+            assert ctx0 != t
+            assert ctx0._fixtures == t._fixtures
+            assert ctx0._options == t._options
+            @t.fixture
+            def new_one():
+                yield 42
+            assert ctx0._fixtures != t._fixtures
+            assert "new_one" in t._fixtures
+            assert "new_one" not in ctx0._fixtures
+
+
 # define, test and install default fixture
 # do not use @test.fixture as we need to install this twice
 def raises(exception=Exception, message=None):
@@ -507,85 +537,82 @@ def raises(exception=Exception, message=None):
         e = AssertionError(f"should raise {exception.__name__}")
         e.__suppress_context__ = True
         raise e
-self_test.fixture(raises)
+self_test2.fixture(raises)
 
 
-@self_test
+@self_test2
 def assert_raises():
-    with self_test.raises:
+    with self_test2.raises:
         raise Exception
     try:
-        with self_test.raises:
+        with self_test2.raises:
             pass
     except AssertionError as e:
         assert 'should raise Exception' == str(e), e
 
 
-@self_test
+@self_test2
 def assert_raises_specific_exception():
-    with self_test.raises(KeyError):
+    with self_test2.raises(KeyError):
         raise KeyError
     try:
-        with self_test.raises(KeyError):
+        with self_test2.raises(KeyError):
             raise RuntimeError('oops')
     except AssertionError as e:
         assert 'should raise KeyError but raised RuntimeError' == str(e), str(e)
     try:
-        with self_test.raises(KeyError):
+        with self_test2.raises(KeyError):
             pass
     except AssertionError as e:
         assert 'should raise KeyError' == str(e), e
 
 
-@self_test
+@self_test2
 def assert_raises_specific_message():
-    with self_test.raises(RuntimeError, "hey man!"):
+    with self_test2.raises(RuntimeError, "hey man!"):
         raise RuntimeError("hey man!")
     try:
-        with self_test.raises(RuntimeError, "hey woman!"):
+        with self_test2.raises(RuntimeError, "hey woman!"):
             raise RuntimeError("hey man!")
     except AssertionError as e:
         assert "should raise RuntimeError with message 'hey woman!'" == str(e)
 
 
-from utils import bind_1_frame_back # redefine placeholder
-
-
 class binding_context:
     a = 42
-    @self_test(keep=True)
+    @self_test2(keep=True)
     def one_test():
         assert a == 42
     a = 43
     one_test()
 
 
-@self_test
+@self_test2
 def access_closure_from_enclosing_def():
     a = 46              # accessing this in another function makes it a 'freevar', which needs a closure
-    @self_test
+    @self_test2
     def access_a():
         assert 46 == a
 
 
 f = 16
 
-@self_test
+@self_test2
 def dont_confuse_app_vars_with_internal_vars():
     assert 16 == f
 
 
-@self_test
+@self_test2
 def idea_for_dumb_diffs():
     # if you want a so called smart diff: the second arg of assert is meant for it.
     # Runner supplies a generic diff between two pretty printed values
     a = [7, 1, 2, 8, 3, 4]
     b = [1, 2, 9, 3, 4, 6]
-    d = self_test.diff(a, b)
+    d = self_test2.diff(a, b)
     assert str == type(str(d))
 
     try:
-        assert a == b, self_test.diff(a,b)
+        assert a == b, self_test2.diff(a,b)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -597,7 +624,7 @@ def idea_for_dumb_diffs():
 
 
     try:
-        self_test.eq(a, b, diff=self_test.diff)
+        self_test2.eq(a, b, diff=self_test2.diff)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -616,12 +643,12 @@ def idea_for_dumb_diffs():
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
     try:
-        self_test.eq(a, b, diff=set.symmetric_difference)
+        self_test2.eq(a, b, diff=set.symmetric_difference)
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
 
 
-#@self_test # temp disable bc it cause system installed autotest import via diff2
+#@self_test2 # temp disable bc it cause system installed autotest import via diff2
 def diff2_sorting_including_uncomparables():
     msg = """
   {
@@ -634,8 +661,8 @@ def diff2_sorting_including_uncomparables():
 
 -     <class 'bool'>,
   }"""
-    with self_test.raises(AssertionError, msg):
-        self_test.eq({dict: bool}, {str, 1}, msg=self_test.diff2)
+    with self_test2.raises(AssertionError, msg):
+        self_test2.eq({dict: bool}, {str, 1}, msg=self_test2.diff2)
 
 
 def filter_traceback(root):
@@ -650,7 +677,7 @@ def filter_traceback(root):
     return root
 
 
-@self_test
+@self_test2
 def trace_backfiltering():
     def eq(a, b):
         AUTOTEST_INTERNAL = 1
@@ -666,7 +693,7 @@ def trace_backfiltering():
     def A():
         B_in_betwixt()
 
-    self_test.contains(B_in_betwixt.__code__.co_varnames, 'AUTOTEST_INTERNAL')
+    self_test2.contains(B_in_betwixt.__code__.co_varnames, 'AUTOTEST_INTERNAL')
 
     def test_names(*should):
         _, _, tb = sys.exc_info()
@@ -721,34 +748,34 @@ def trace_backfiltering():
         test_names('trace_backfiltering', 'C', 'A', 'B')
 
     try:
-        @self_test
+        @self_test2
         def test_for_real_with_Runner_involved():
-            self_test.eq(1, 2)
+            self_test2.eq(1, 2)
     except AssertionError:
         test_names('trace_backfiltering', 'test_for_real_with_Runner_involved')
 
 
-@self_test
+@self_test2
 def test_isinstance():
-    self_test.isinstance(1, int)
-    self_test.isinstance(1.1, (int, float))
-    with self_test.raises(AssertionError, "('isinstance', 1, <class 'str'>)"):
-        self_test.isinstance(1, str)
-    with self_test.raises(AssertionError, "('isinstance', 1, (<class 'str'>, <class 'dict'>))"):
-        self_test.isinstance(1, (str, dict))
+    self_test2.isinstance(1, int)
+    self_test2.isinstance(1.1, (int, float))
+    with self_test2.raises(AssertionError, "('isinstance', 1, <class 'str'>)"):
+        self_test2.isinstance(1, str)
+    with self_test2.raises(AssertionError, "('isinstance', 1, (<class 'str'>, <class 'dict'>))"):
+        self_test2.isinstance(1, (str, dict))
 
 
-@self_test
+@self_test2
 def use_builtin():
     """ you could use any builtin as well; there are not that much useful options in module builtins though
         we could change the priority of lookups, now it is: operator, builtins, <arg[0]>. Maybe reverse? """
-    self_test.all([1,2,3])
-    with self_test.raises(AssertionError):
-        self_test.all([False,2,3])
+    self_test2.all([1,2,3])
+    with self_test2.raises(AssertionError):
+        self_test2.all([False,2,3])
     class A: pass
     class B(A): pass
-    self_test.issubclass(B, A)
-    self_test.hasattr([], 'append')
+    self_test2.issubclass(B, A)
+    self_test2.hasattr([], 'append')
 
 
 def any(_): # name is included in diffs
@@ -765,38 +792,40 @@ class wildcard:
     def __repr__(self):
         return self.f.__name__  + '(...)' if self.f else '*'
 
-self_test.any = wildcard()
+self_test2.any = wildcard()
 
 
-@self_test
+@self_test2
 def wildcard_matching():
-    self_test.eq([self_test.any, 42], [16, 42])
-    self_test.eq([self_test.any(lambda x: x in [1,2,3]), 78], [2, 78])
-    self_test.ne([self_test.any(lambda x: x in [1,2,3]), 78], [4, 78])
+    self_test2.eq([self_test2.any, 42], [16, 42])
+    self_test2.eq([self_test2.any(lambda x: x in [1,2,3]), 78], [2, 78])
+    self_test2.ne([self_test2.any(lambda x: x in [1,2,3]), 78], [4, 78])
 
 
-from fixtures import WithFixtures, fixtures_tests
-fixtures_tests(self_test)
+@self_test2
+def assert_raises_as_fixture(raises:KeyError):
+    {}[0]
+
 
 class nested_async_tests:
     done = [False, False, False]
 
-    @self_test
+    @self_test2
     async def this_is_an_async_test():
         done[0] = True
         """ A decorator is always called synchronously, so it can't call the async test
             because an event loop is already running. Solution is to start a new loop."""
-        @self_test
+        @self_test2
         async def this_is_a_nested_async_test():
             done[1] = True
-            @self_test
+            @self_test2
             async def this_is_a_doubly_nested_async_test():
                 done[2] = True
 
-    self_test.all(done)
+    self_test2.all(done)
 
 
-@self_test.fixture
+@self_test2.fixture
 def stringio_handler():
     import io
     s = io.StringIO()
@@ -807,27 +836,27 @@ def stringio_handler():
 
 class logging_handlers:
 
-    @self_test.fixture
+    @self_test2.fixture
     def logging_runner(stringio_handler, name='main'):
         s, myhandler = stringio_handler
-        tester = Runner(name)
+        tester = Runner(name) # No hooks for operators and fixtures
         tester.addHandler(myhandler)
         yield tester, s
 
 
-    @self_test
+    @self_test2
     def tester_with_handler(logging_runner:'carl'):
         tester, s = logging_runner
         _line_ = inspect.currentframe().f_lineno
         @tester
         def a_test():
-            tester.eq(1,1)
+            assert 1 == 1  # hooks for operators not present
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler.<locals>.a_test"
-        self_test.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
+        self_test2.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
 
 
-    @self_test
+    @self_test2
     def sub_tester_propagates(logging_runner:'main'):
         """ propagate to parent """
         main, s = logging_runner
@@ -835,14 +864,14 @@ class logging_handlers:
         _line_ = inspect.currentframe().f_lineno
         @sub
         def my_sub_test():
-            sub.eq(1,1)
+            assert 1 == 1  # hooks for operators not present
         log_msg = s.getvalue()
-        self_test.startswith(log_msg, f"main.sub1-")
+        self_test2.startswith(log_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_propagates.<locals>.my_sub_test"
-        self_test.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test2.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
 
 
-    @self_test
+    @self_test2
     def sub_tester_does_not_propagate(stringio_handler, logging_runner:'main'):
         main, main_s = logging_runner
         sub_s, subhandler = stringio_handler
@@ -851,16 +880,16 @@ class logging_handlers:
         _line_ = inspect.currentframe().f_lineno
         @sub
         def my_sub_test():
-            sub.eq(1,1)
+            assert 1 == 1  # hooks for operators not present
         main_msg = main_s.getvalue()
         sub_msg = sub_s.getvalue()
-        self_test.startswith(sub_msg, f"main.sub1-")
+        self_test2.startswith(sub_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_does_not_propagate.<locals>.my_sub_test"
-        self_test.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
-        self_test.eq('', main_msg) # do not duplicate message in parent
+        self_test2.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test2.eq('', main_msg) # do not duplicate message in parent
 
 
-    @self_test.fixture
+    @self_test2.fixture
     def intercept():
         records = []
         root_logger = logging.getLogger()
@@ -870,55 +899,55 @@ class logging_handlers:
         finally:
             root_logger.removeFilter(records.append)
 
-    @self_test
+    @self_test2
     def tester_delegates_to_root_logger(intercept):
         tester = Runner('free')
         @tester
         def my_output_goes_to_root_logger():
-            tester.eq(1,1)
-        self_test.eq('my_output_goes_to_root_logger', intercept[0].funcName)
+            assert 1 == 1 # hooks for operators not present
+        self_test2.eq('my_output_goes_to_root_logger', intercept[0].funcName)
 
 
-    @self_test
+    @self_test2
     def tester_with_handler_failing(logging_runner:'esmee'):
         tester, s = logging_runner
         try:
             _line_ = inspect.currentframe().f_lineno
             @tester
             def a_failing_test():
-                tester.eq(1,2)
+                assert 1 == 2
         except AssertionError:
             pass
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
-        self_test.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
+        self_test2.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
 
 
 class testing_levels:
     runs = [None, None]
-    with self_test.child('tst', level=CRITICAL) as tst:
+    with self_test2.child('tst', level=CRITICAL) as tst:
         @tst.critical
         def a_critial_test_always_runs():
             runs[0] = True
         @tst.unit
         def a_unit_test_often_runs():
             runs[1] = True
-    self_test.eq([True, None], runs)
+    self_test2.eq([True, None], runs)
 
     runs = [None, None]
-    with self_test.child(level=INTEGRATION) as tst:
+    with self_test2.child(level=INTEGRATION) as tst:
         @tst.integration
         def a_integration_test_sometimes_runs():
             runs[0] = True
         @tst.performance
         def a_performance_test_sometimes_runs():
             runs[1] = True
-    self_test.eq([True, None], runs)
+    self_test2.eq([True, None], runs)
 
 
-@self_test
+@self_test2
 def log_stats(intercept):
-    with self_test.child() as tst:
+    with self_test2.child() as tst:
         @tst
         def one(): pass
         @tst
@@ -928,6 +957,6 @@ def log_stats(intercept):
     tst.contains(msg, "found: 2, run: 2")
 
 
-@self_test
+@self_test2
 def check_stats():
-    self_test.eq({'found': 88, 'run': 82}, self_test._stats)
+    self_test.eq({'found': 89, 'run': 83}, self_test._stats)

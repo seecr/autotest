@@ -16,6 +16,7 @@ class WithFixtures:
     """ Activates all fixtures recursively, then runs the test function. """
 
     def __init__(self, runner, func):
+        #print("WithFixtures", func)
         self.runner = runner
         self.func = func
 
