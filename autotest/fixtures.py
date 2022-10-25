@@ -5,6 +5,7 @@ import inspect
 import asyncio
 import contextlib
 import threading        # run nested async tests in thread
+import asyncio          # support for async test and fixtures
 import sys
 import os
 
@@ -18,13 +19,12 @@ class WithFixtures:
     """ Activates all fixtures recursively, then runs the test function. """
 
     def __init__(self, runner, func):
-        #print("WithFixtures", func)
         self.runner = runner
         self.func = func
 
 
     @classmethod
-    def lookup(self, tester, name, **__):
+    def lookup(self, tester, name):
         if name == 'fixture':
             def fixture(func):
                 """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
@@ -605,5 +605,29 @@ def fixtures_tests(self_test):
         assert ['S', 'E'] == trace
         self_test(rebind_on_every_call)
         assert ['S', 'E', 'S', 'E'] == trace
+
+
+    @self_test
+    async def async_function():
+        await asyncio.sleep(0)
+        assert True
+
+
+    class nested_async_tests:
+        done = [False, False, False]
+
+        @self_test
+        async def this_is_an_async_test():
+            done[0] = True
+            """ A decorator is always called synchronously, so it can't call the async test
+                because an event loop is already running. Solution is to start a new loop."""
+            @self_test
+            async def this_is_a_nested_async_test():
+                done[1] = True
+                @self_test2
+                async def this_is_a_doubly_nested_async_test():
+                    done[2] = True
+
+        self_test.all(done)
 
 

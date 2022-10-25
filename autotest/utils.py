@@ -140,3 +140,93 @@ def extra_args_supplying_contextmanager():
         assert ('a', 'b', 'c', 'd', 'e', 'f') == v, v
 
 
+def filter_traceback(root):
+    while root and is_internal(root.tb_frame):
+        root = root.tb_next
+    tb = root
+    while tb and tb.tb_next:
+        if is_internal(tb.tb_next.tb_frame):
+           tb.tb_next = tb.tb_next.tb_next
+        else:
+           tb = tb.tb_next
+    return root
+
+
+#@self_test2   #TODO
+def trace_backfiltering():
+    def eq(a, b):
+        AUTOTEST_INTERNAL = 1
+        assert a == b
+
+    def B():
+        eq(1, 2)
+
+    def B_in_betwixt():
+        AUTOTEST_INTERNAL = 1
+        B()
+
+    def A():
+        B_in_betwixt()
+
+    self_test2.contains(B_in_betwixt.__code__.co_varnames, 'AUTOTEST_INTERNAL')
+
+    def test_names(*should):
+        _, _, tb = sys.exc_info()
+        tb = filter_traceback(tb)
+        names = tuple(tb.tb_frame.f_code.co_name for tb in iterate(lambda tb: tb.tb_next, tb))
+        assert should == names, tuple(tb.tb_frame.f_code for tb in iterate(lambda tb: tb.tb_next, tb))
+
+    try:
+        eq(1, 2)
+    except AssertionError:
+        test_names('trace_backfiltering')
+
+    try:
+        B()
+    except AssertionError:
+        test_names('trace_backfiltering', 'B')
+
+    try:
+        B_in_betwixt()
+    except AssertionError:
+        test_names('trace_backfiltering', 'B')
+
+    try:
+        A()
+    except AssertionError:
+        test_names('trace_backfiltering', 'A', 'B')
+
+    def C():
+        A()
+
+    def D():
+        AUTOTEST_INTERNAL = 1
+        C()
+
+    def E():
+        AUTOTEST_INTERNAL = 1
+        D()
+
+    try:
+        C()
+    except AssertionError:
+        test_names('trace_backfiltering', 'C', 'A', 'B')
+
+    try:
+        D()
+    except AssertionError:
+        test_names('trace_backfiltering', 'C', 'A', 'B')
+
+    try:
+        E()
+    except AssertionError:
+        test_names('trace_backfiltering', 'C', 'A', 'B')
+
+    try:
+        @self_test2
+        def test_for_real_with_Runner_involved():
+            self_test2.eq(1, 2)
+    except AssertionError:
+        test_names('trace_backfiltering', 'test_for_real_with_Runner_involved')
+
+

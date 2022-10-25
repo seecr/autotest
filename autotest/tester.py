@@ -12,30 +12,18 @@
 """
 
 import inspect          # for recognizing functions, generators etc
-import sys              # exc_info and builtins
-import contextlib       # fixtures are contexts
-import asyncio          # support for async test and fixtures
+import contextlib       # child as context
 import difflib          # show diffs on failed tests with two args
 import pprint           # show diffs on failed tests with two args
 import collections      # chain maps for hierarchical Runners and Counter
-import operator         # operators for asserting
-import builtins         # operators for asserting
+import operator         # not
 import logging          # output to logger
-import functools
 
 
-from utils import is_main_process, frame_to_traceback, iterate, is_internal, ensure_async_generator_func
-from utils import ContextManagerType, AsyncContextManagerType
+from utils import is_main_process
 
 
 __all__ = ['getTester']
-
-
-CRITICAL    = logging.CRITICAL
-UNIT        = logging.ERROR
-INTEGRATION = logging.WARNING
-PERFORMANCE = logging.INFO
-NOTSET      = logging.NOTSET
 
 
 defaults = dict(
@@ -44,7 +32,6 @@ defaults = dict(
     timeout   = 2,               # asyncio task timeout
     debug     = True,            # use debug for asyncio.run
     format    = pprint.pformat,  # set a function for formatting diffs on failures
-    level     = UNIT,            # default test level
 )
 
 
@@ -88,30 +75,8 @@ class Runner: # aka Tester
             logging.getLogger().handle(logrecord)
 
 
-    def critical(self, *_, **__):
-        return self(*_, level=CRITICAL, **__)
-
-    def unit(self, *_, **__):
-        return self(*_, level=UNIT, **__)
-
-    def integration(self, *_, **__):
-        return self(*_, level=INTEGRATION, **__)
-
-    def performance(self, *_, **__):
-        return self(*_, level=PERFORMANCE, **__)
-
-
     def fail(self, *args, **kwds):
         raise AssertionError(*args, *(kwds,) if kwds else ())
-
-
-    @property
-    def comp(self):
-        class Not:
-            def __getattr__(inner, name):
-                return self.__getattr__(name, truth=operator.not_)
-        return Not()
-    complement = comp
 
 
     def diff(self, a, b, ff=None):
@@ -166,7 +131,7 @@ class Runner: # aka Tester
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
             self._name,                               # name of logger
-            self._options.get('level'),               # log level
+            self._options.get('level', 40),               # log level   #TODO
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -182,16 +147,16 @@ class Runner: # aka Tester
         AUTOTEST_INTERNAL = 1
         self._stat('found')
         skip = self._options.get('skip')
-        level = self._options.get('level', UNIT)
-        plevel = self._parent._options.get('level', UNIT) if self._parent else UNIT
-        skip = skip or level < plevel
         orig_test_func = test_func
         for hook in self._hooks():
             test_func = hook(self, test_func)
-        if inspect.isfunction(skip) and not skip(test_func) or not skip:
-            self._stat('run')
-            self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
-            test_func(*app_args, **app_kwds)
+            if not test_func:
+                break
+        if test_func:
+            if inspect.isfunction(skip) and not skip(test_func) or not skip:
+                self._stat('run')
+                self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
+                test_func(*app_args, **app_kwds)
         return orig_test_func if self._options.get('keep') else None
 
 
@@ -199,62 +164,18 @@ class Runner: # aka Tester
         self.handle(self._create_logrecord(None, ', '.join(f'{k}: {v}' for k, v in self._stats.most_common())))
 
 
-    def __getattr__(self, name, truth=bool):
+    def __getattr__(self, name):
         for hook in self._hooks():
             try:
-                return hook.lookup(self, name, truth=truth)
+                return hook.lookup(self, name)
             except AttributeError:
                 pass
 
 
-class OperatorLookup:
-    def __call__(self, tester, f):
-        return f
-    def lookup(self, runner, name, truth=bool):
-        def call_operator(*args, diff=None):
-            # test.<operator>(*args)
-            AUTOTEST_INTERNAL = 1
-            if hasattr(operator, name):
-                op = getattr(operator, name)
-            elif hasattr(builtins, name):
-                op = getattr(builtins, name)
-            else:
-                op = getattr(args[0], name)
-                args = args[1:]
-            if truth(op(*args)):
-                return True
-            msg = (diff(*args),) if diff else (op.__name__,) + args
-            raise AssertionError(*msg)
-        return call_operator
-
+from operators import OperatorLookup
 
 self_test = Runner('autotest-self-tests',
         hooks=(OperatorLookup(),)) # separate runner for bootstrapping/self testing
-
-def filter_traceback(tb):
-    """ Bootstrapping, placeholder, overwritten later """
-    pass
-
-
-""" Bootstrapping, placeholder, overwritten later """
-class WithFixtures:
-    def __init__(self, runner, f):
-        self.runner = runner
-        self.func = f
-    def __call__(self, *a, **k):
-        AUTOTEST_INTERNAL = 1
-        return self.func(*a, **k)
-
-
-
-""" Bootstrapping, placeholder, overwritten later """
-ArgsCollectingContextManager = contextlib.contextmanager
-
-
-""" Bootstrapping, placeholder, overwritten later """
-def bind_1_frame_back(_func_):
-    return _func_
-
 
 
 from numbers import Number
@@ -397,12 +318,6 @@ def call_test_with_complete_context():
         assert True
     assert a_test, a_test
     self_test(a_test)
-
-
-@self_test
-async def async_function():
-    await asyncio.sleep(0)
-    assert True
 
 
 from fixtures import WithFixtures, fixtures_tests
@@ -611,96 +526,6 @@ def diff2_sorting_including_uncomparables():
         self_test2.eq({dict: bool}, {str, 1}, msg=self_test2.diff2)
 
 
-def filter_traceback(root):
-    while root and is_internal(root.tb_frame):
-        root = root.tb_next
-    tb = root
-    while tb and tb.tb_next:
-        if is_internal(tb.tb_next.tb_frame):
-           tb.tb_next = tb.tb_next.tb_next
-        else:
-           tb = tb.tb_next
-    return root
-
-
-@self_test2
-def trace_backfiltering():
-    def eq(a, b):
-        AUTOTEST_INTERNAL = 1
-        assert a == b
-
-    def B():
-        eq(1, 2)
-
-    def B_in_betwixt():
-        AUTOTEST_INTERNAL = 1
-        B()
-
-    def A():
-        B_in_betwixt()
-
-    self_test2.contains(B_in_betwixt.__code__.co_varnames, 'AUTOTEST_INTERNAL')
-
-    def test_names(*should):
-        _, _, tb = sys.exc_info()
-        tb = filter_traceback(tb)
-        names = tuple(tb.tb_frame.f_code.co_name for tb in iterate(lambda tb: tb.tb_next, tb))
-        assert should == names, tuple(tb.tb_frame.f_code for tb in iterate(lambda tb: tb.tb_next, tb))
-
-    try:
-        eq(1, 2)
-    except AssertionError:
-        test_names('trace_backfiltering')
-
-    try:
-        B()
-    except AssertionError:
-        test_names('trace_backfiltering', 'B')
-
-    try:
-        B_in_betwixt()
-    except AssertionError:
-        test_names('trace_backfiltering', 'B')
-
-    try:
-        A()
-    except AssertionError:
-        test_names('trace_backfiltering', 'A', 'B')
-
-    def C():
-        A()
-
-    def D():
-        AUTOTEST_INTERNAL = 1
-        C()
-
-    def E():
-        AUTOTEST_INTERNAL = 1
-        D()
-
-    try:
-        C()
-    except AssertionError:
-        test_names('trace_backfiltering', 'C', 'A', 'B')
-
-    try:
-        D()
-    except AssertionError:
-        test_names('trace_backfiltering', 'C', 'A', 'B')
-
-    try:
-        E()
-    except AssertionError:
-        test_names('trace_backfiltering', 'C', 'A', 'B')
-
-    try:
-        @self_test2
-        def test_for_real_with_Runner_involved():
-            self_test2.eq(1, 2)
-    except AssertionError:
-        test_names('trace_backfiltering', 'test_for_real_with_Runner_involved')
-
-
 @self_test2
 def test_isinstance():
     self_test2.isinstance(1, int)
@@ -751,24 +576,6 @@ def wildcard_matching():
 @self_test2
 def assert_raises_as_fixture(raises:KeyError):
     {}[0]
-
-
-class nested_async_tests:
-    done = [False, False, False]
-
-    @self_test2
-    async def this_is_an_async_test():
-        done[0] = True
-        """ A decorator is always called synchronously, so it can't call the async test
-            because an event loop is already running. Solution is to start a new loop."""
-        @self_test2
-        async def this_is_a_nested_async_test():
-            done[1] = True
-            @self_test2
-            async def this_is_a_doubly_nested_async_test():
-                done[2] = True
-
-    self_test2.all(done)
 
 
 @self_test2.fixture
@@ -869,28 +676,6 @@ class logging_handlers:
         self_test2.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
 
 
-class testing_levels:
-    runs = [None, None]
-    with self_test2.child('tst', level=CRITICAL) as tst:
-        @tst.critical
-        def a_critial_test_always_runs():
-            runs[0] = True
-        @tst.unit
-        def a_unit_test_often_runs():
-            runs[1] = True
-    self_test2.eq([True, None], runs)
-
-    runs = [None, None]
-    with self_test2.child(level=INTEGRATION) as tst:
-        @tst.integration
-        def a_integration_test_sometimes_runs():
-            runs[0] = True
-        @tst.performance
-        def a_performance_test_sometimes_runs():
-            runs[1] = True
-    self_test2.eq([True, None], runs)
-
-
 @self_test2
 def log_stats(intercept):
     with self_test2.child() as tst:
@@ -903,6 +688,12 @@ def log_stats(intercept):
     tst.contains(msg, "found: 2, run: 2")
 
 
+
+from levels import Levels, testing_levels
+testing_levels(self_test2)
+
+
 @self_test2
 def check_stats():
     self_test.eq({'found': 89, 'run': 83}, self_test._stats)
+
