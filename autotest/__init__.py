@@ -23,41 +23,53 @@
 
 
 
-""" TODO
- 1. detect running async loop and use that one iso a new one
- 2. if no args, find and run all modules from current dir, but recursively
- 4. old behaviour (skip dependencies) via argument??
-
- 5. Restructure like python logging
-  a. import autotest
-  b. @autotest.test             # refers to root tester
-  c. autotest.basicConfig(...)  # configure root tester
-  d. autotest.getTester(qname)  # get a sub tester of root (globally named)
-  e. tester.getChild(suffix)    # get a sub tester (descendant of tester)
- 6. Let autotest send output to Logger/Handler/Filter/Formatter
-  a. introduce new loglevel TEST = 5  # just below DEBUG
-  b. use test levels:
-        sideeffects = 50
-        efficiency = 40
-        integration = 30
-        unit = 20
-        function = 10
-        essential = 0
-     import autotest
-     test = autotest.getTester()  # qname is None, gets root
-     @test.essential
-     def test_func(): ...
-
-"""
-
-
-sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
+#TODO
+#sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
 
 
 
-from tester import Runner, tmp_path
-test = Runner()
-test.fixture(tmp_path)
+from .tester import self_test
+
+from .wildcard import Wildcard, testing_wildcard
+testing_wildcard(self_test)
+
+from .binder import Binder, testing_binder
+testing_binder(self_test)
+
+from .levels import Levels, testing_levels
+testing_levels(self_test)
+
+from .operators import Operators, testing_operators
+testing_operators(self_test)
+
+from .fixtures import Fixtures, testing_fixtures
+testing_fixtures(self_test)
+
+#assert len(self_test._options.get('hooks')) == 1
+#assert len(self_test2._options.get('hooks')) == 2
+#hooks = list(self_test2._hooks())
+#assert hooks[0] == binder, hooks[0]
+#assert hooks[1] == WithFixtures, hooks[1]
+#assert hooks[2].__class__ == OperatorLookup, hooks[2]
+#assert len(hooks) == 3
+
+
+
+@self_test
+def check_stats():
+    self_test.eq({'found': 89, 'run': 83}, self_test._stats)
+
+
+
+
+
+
+
+
+
+
+
+
 
 @test
 def setup_correct(tmp_path):

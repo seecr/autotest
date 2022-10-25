@@ -20,7 +20,7 @@ import operator         # not
 import logging          # output to logger
 
 
-from utils import is_main_process
+from .utils import is_main_process
 
 
 __all__ = ['getTester']
@@ -148,7 +148,10 @@ class Runner: # aka Tester
         self._stat('found')
         skip = self._options.get('skip')
         orig_test_func = test_func
+        # TODO make conditions nicer
+        print(" == hooking == ")
         for hook in self._hooks():
+            print(" == HOOK:", hook)
             test_func = hook(self, test_func)
             if not test_func:
                 break
@@ -172,12 +175,6 @@ class Runner: # aka Tester
                 pass
 
 
-from operators import OperatorLookup
-
-self_test = Runner('autotest-self-tests',
-        hooks=(OperatorLookup(),)) # separate runner for bootstrapping/self testing
-
-
 from numbers import Number
 class any_number:
     def __init__(self, lo, hi):
@@ -185,6 +182,12 @@ class any_number:
         self._hi = hi
     def __eq__(self, rhs):
         return isinstance(rhs, Number) and self._lo <= rhs <= self._hi
+
+
+from .operators import Operators
+
+self_test = Runner('autotest-self-tests',
+        hooks=(Operators(),)) # separate runner for bootstrapping/self testing
 
 
 @self_test
@@ -320,160 +323,18 @@ def call_test_with_complete_context():
     self_test(a_test)
 
 
-from fixtures import WithFixtures, fixtures_tests
 
-
-from utils import bind_1_frame_back # redefine placeholder
-def binder(self, func):
-    return bind_1_frame_back(func)
-self_test2 = self_test.getChild(hooks=(
-    WithFixtures,
-    binder
-    )
-)
-
-assert len(self_test._options.get('hooks')) == 1
-assert len(self_test2._options.get('hooks')) == 2
-hooks = list(self_test2._hooks())
-assert hooks[0] == binder, hooks[0]
-assert hooks[1] == WithFixtures, hooks[1]
-assert hooks[2].__class__ == OperatorLookup, hooks[2]
-assert len(hooks) == 3
-
-fixtures_tests(self_test2)
-
-
-with self_test2.child() as tst:
-    @tst
-    def nested_defaults():
-        dflts0 = tst._options
-        assert not dflts0['skip']
-        with tst.child(skip=True) as tstk:
-            dflts1 = tstk._options
-            assert dflts1['skip']
-            @tstk
-            def fails_but_is_skipped():
-                tstk.eq(1, 2)
-            try:
-                with tstk.child(skip=False) as TeSt:
-                    dflts2 = TeSt._options
-                    assert not dflts2['skip']
-                    @TeSt
-                    def fails_but_is_not_reported():
-                        TeSt.gt(1, 2)
-                    tst.fail()
-                assert tstk._options == dflts1
-            except AssertionError as e:
-                tstk.eq("('gt', 1, 2)", str(e))
-        assert tst._options == dflts0
-
-    @tst
-    def shorthand_for_new_context_without_options():
-        """ Use this for defining new/tmp fixtures. """
-        ctx0 = tst
-        with tst.child() as t:
-            assert ctx0 != t
-            assert ctx0._fixtures == t._fixtures
-            assert ctx0._options == t._options
-            @t.fixture
-            def new_one():
-                yield 42
-            assert ctx0._fixtures != t._fixtures
-            assert "new_one" in t._fixtures
-            assert "new_one" not in ctx0._fixtures
-
-
-# define, test and install default fixture
-# do not use @test.fixture as we need to install this twice
-def raises(exception=Exception, message=None):
-    AUTOTEST_INTERNAL = 1
-    try:
-        yield
-    except exception as e:
-        if message and message != str(e):
-            raise AssertionError(f"should raise {exception.__name__} with message '{message}'") from e
-    except BaseException as e:
-        raise AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}").with_traceback(e.__traceback__) from e
-    else:
-        e = AssertionError(f"should raise {exception.__name__}")
-        e.__suppress_context__ = True
-        raise e
-self_test2.fixture(raises)
-
-
-@self_test2
-def assert_raises():
-    with self_test2.raises:
-        raise Exception
-    try:
-        with self_test2.raises:
-            pass
-    except AssertionError as e:
-        assert 'should raise Exception' == str(e), e
-
-
-@self_test2
-def assert_raises_specific_exception():
-    with self_test2.raises(KeyError):
-        raise KeyError
-    try:
-        with self_test2.raises(KeyError):
-            raise RuntimeError('oops')
-    except AssertionError as e:
-        assert 'should raise KeyError but raised RuntimeError' == str(e), str(e)
-    try:
-        with self_test2.raises(KeyError):
-            pass
-    except AssertionError as e:
-        assert 'should raise KeyError' == str(e), e
-
-
-@self_test2
-def assert_raises_specific_message():
-    with self_test2.raises(RuntimeError, "hey man!"):
-        raise RuntimeError("hey man!")
-    try:
-        with self_test2.raises(RuntimeError, "hey woman!"):
-            raise RuntimeError("hey man!")
-    except AssertionError as e:
-        assert "should raise RuntimeError with message 'hey woman!'" == str(e)
-
-
-class binding_context:
-    a = 42
-    @self_test2(keep=True)
-    def one_test():
-        assert a == 42
-    a = 43
-    #one_test()
-
-
-@self_test2
-def access_closure_from_enclosing_def():
-    a = 46              # accessing this in another function makes it a 'freevar', which needs a closure
-    @self_test2
-    def access_a():
-        assert 46 == a
-
-
-f = 16
-
-@self_test2
-def dont_confuse_app_vars_with_internal_vars():
-    assert 16 == f
-
-
-@self_test2
+@self_test
 def idea_for_dumb_diffs():
     # if you want a so called smart diff: the second arg of assert is meant for it.
     # Runner supplies a generic diff between two pretty printed values
     a = [7, 1, 2, 8, 3, 4]
     b = [1, 2, 9, 3, 4, 6]
-    d = self_test2.diff(a, b)
+    d = self_test.diff(a, b)
     assert str == type(str(d))
 
     try:
-        assert a == b, self_test2.diff(a,b)
+        assert a == b, self_test.diff(a,b)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -485,7 +346,7 @@ def idea_for_dumb_diffs():
 
 
     try:
-        self_test2.eq(a, b, diff=self_test2.diff)
+        self_test.eq(a, b, diff=self_test.diff)
     except AssertionError as e:
         assert """
 - [7, 1, 2, 8, 3, 4]
@@ -504,7 +365,7 @@ def idea_for_dumb_diffs():
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
     try:
-        self_test2.eq(a, b, diff=set.symmetric_difference)
+        self_test.eq(a, b, diff=set.symmetric_difference)
     except AssertionError as e:
         assert "{6, 7, 8, 9}" == str(e), e
 
@@ -526,108 +387,65 @@ def diff2_sorting_including_uncomparables():
         self_test2.eq({dict: bool}, {str, 1}, msg=self_test2.diff2)
 
 
-@self_test2
-def test_isinstance():
-    self_test2.isinstance(1, int)
-    self_test2.isinstance(1.1, (int, float))
-    with self_test2.raises(AssertionError, "('isinstance', 1, <class 'str'>)"):
-        self_test2.isinstance(1, str)
-    with self_test2.raises(AssertionError, "('isinstance', 1, (<class 'str'>, <class 'dict'>))"):
-        self_test2.isinstance(1, (str, dict))
-
-
-@self_test2
-def use_builtin():
-    """ you could use any builtin as well; there are not that much useful options in module builtins though
-        we could change the priority of lookups, now it is: operator, builtins, <arg[0]>. Maybe reverse? """
-    self_test2.all([1,2,3])
-    with self_test2.raises(AssertionError):
-        self_test2.all([False,2,3])
-    class A: pass
-    class B(A): pass
-    self_test2.issubclass(B, A)
-    self_test2.hasattr([], 'append')
-
-
-def any(_): # name is included in diffs
-    return True
-
-
-class wildcard:
-    def __init__(self, f=any):
-        self.f = f
-    def __eq__(self, x):
-        return bool(self.f(x))
-    def __call__(self, f):
-        return wildcard(f)
-    def __repr__(self):
-        return self.f.__name__  + '(...)' if self.f else '*'
-
-self_test2.any = wildcard()
-
-
-@self_test2
-def wildcard_matching():
-    self_test2.eq([self_test2.any, 42], [16, 42])
-    self_test2.eq([self_test2.any(lambda x: x in [1,2,3]), 78], [2, 78])
-    self_test2.ne([self_test2.any(lambda x: x in [1,2,3]), 78], [4, 78])
-
-
-@self_test2
-def assert_raises_as_fixture(raises:KeyError):
-    {}[0]
-
-
-@self_test2.fixture
 def stringio_handler():
     import io
     s = io.StringIO()
     h = logging.StreamHandler(s)
     h.setFormatter(logging.Formatter(fmt="{name}-{levelno}-{pathname}-{lineno}-{message}-{exc_info}-{funcName}-{stack_info}", style='{'))
-    yield s, h
+    return s, h
+
+
+def logging_runner(name):
+    s, myhandler = stringio_handler()
+    tester = Runner(name) # No hooks for operators and fixtures
+    tester.addHandler(myhandler)
+    return tester, s
+
+
+@contextlib.contextmanager
+def intercept():
+    records = []
+    root_logger = logging.getLogger()
+    root_logger.addFilter(records.append) # intercept only
+    try:
+        yield records
+    finally:
+        root_logger.removeFilter(records.append)
 
 
 class logging_handlers:
 
-    @self_test2.fixture
-    def logging_runner(stringio_handler, name='main'):
-        s, myhandler = stringio_handler
-        tester = Runner(name) # No hooks for operators and fixtures
-        tester.addHandler(myhandler)
-        yield tester, s
-
-
-    @self_test2
-    def tester_with_handler(logging_runner:'carl'):
-        tester, s = logging_runner
+    @self_test
+    def tester_with_handler():
+        tester, s = logging_runner('carl')
         _line_ = inspect.currentframe().f_lineno
         @tester
         def a_test():
             assert 1 == 1  # hooks for operators not present
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler.<locals>.a_test"
-        self_test2.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
+        self_test.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
 
 
-    @self_test2
-    def sub_tester_propagates(logging_runner:'main'):
+    @self_test
+    def sub_tester_propagates():
         """ propagate to parent """
-        main, s = logging_runner
+        main, s = logging_runner('main')
         sub = main.getChild('sub1')
         _line_ = inspect.currentframe().f_lineno
         @sub
         def my_sub_test():
             assert 1 == 1  # hooks for operators not present
         log_msg = s.getvalue()
-        self_test2.startswith(log_msg, f"main.sub1-")
+        self_test.startswith(log_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_propagates.<locals>.my_sub_test"
-        self_test2.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
 
 
-    @self_test2
-    def sub_tester_does_not_propagate(stringio_handler, logging_runner:'main'):
-        main, main_s = logging_runner
-        sub_s, subhandler = stringio_handler
+    @self_test
+    def sub_tester_does_not_propagate():
+        main, main_s = logging_runner('main')
+        sub_s, subhandler = stringio_handler()
         sub = main.getChild('sub1')
         sub.addHandler(subhandler)
         _line_ = inspect.currentframe().f_lineno
@@ -636,34 +454,25 @@ class logging_handlers:
             assert 1 == 1  # hooks for operators not present
         main_msg = main_s.getvalue()
         sub_msg = sub_s.getvalue()
-        self_test2.startswith(sub_msg, f"main.sub1-")
+        self_test.startswith(sub_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_does_not_propagate.<locals>.my_sub_test"
-        self_test2.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
-        self_test2.eq('', main_msg) # do not duplicate message in parent
+        self_test.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq('', main_msg) # do not duplicate message in parent
 
 
-    @self_test2.fixture
-    def intercept():
-        records = []
-        root_logger = logging.getLogger()
-        root_logger.addFilter(records.append) # intercept only
-        try:
-            yield records
-        finally:
-            root_logger.removeFilter(records.append)
-
-    @self_test2
-    def tester_delegates_to_root_logger(intercept):
-        tester = Runner('free')
-        @tester
-        def my_output_goes_to_root_logger():
-            assert 1 == 1 # hooks for operators not present
-        self_test2.eq('my_output_goes_to_root_logger', intercept[0].funcName)
+    @self_test
+    def tester_delegates_to_root_logger():
+        with intercept() as i:
+            tester = Runner('free')
+            @tester
+            def my_output_goes_to_root_logger():
+                assert 1 == 1 # hooks for operators not present
+            self_test.eq('my_output_goes_to_root_logger', i[0].funcName)
 
 
-    @self_test2
-    def tester_with_handler_failing(logging_runner:'esmee'):
-        tester, s = logging_runner
+    @self_test
+    def tester_with_handler_failing():
+        tester, s = logging_runner('esmee')
         try:
             _line_ = inspect.currentframe().f_lineno
             @tester
@@ -673,27 +482,19 @@ class logging_handlers:
             pass
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
-        self_test2.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
+        self_test.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
 
 
-@self_test2
-def log_stats(intercept):
-    with self_test2.child() as tst:
-        @tst
-        def one(): pass
-        @tst
-        def two(): pass
-    tst.eq(3, len(intercept))
-    msg = intercept[2].msg
-    tst.contains(msg, "found: 2, run: 2")
+    @self_test
+    def log_stats():
+        with intercept() as i:
+            with self_test.child() as tst:
+                @tst
+                def one(): pass
+                @tst
+                def two(): pass
+            tst.eq(3, len(i))
+            msg = i[2].msg
+            tst.contains(msg, "found: 2, run: 2")
 
-
-
-from levels import Levels, testing_levels
-testing_levels(self_test2)
-
-
-@self_test2
-def check_stats():
-    self_test.eq({'found': 89, 'run': 83}, self_test._stats)
 

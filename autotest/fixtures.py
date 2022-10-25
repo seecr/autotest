@@ -9,13 +9,13 @@ import asyncio          # support for async test and fixtures
 import sys
 import os
 
-from utils import asyncio_filtering_exception_handler, ensure_async_generator_func
-from utils import bind_1_frame_back # redefine placeholder
-from utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
+from .utils import asyncio_filtering_exception_handler, ensure_async_generator_func
+from .utils import bind_1_frame_back # redefine placeholder
+from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
 # redefine the placeholder with support for fixtures
-class WithFixtures:
+class Fixtures:
     """ Activates all fixtures recursively, then runs the test function. """
 
     def __init__(self, runner, func):
@@ -35,7 +35,7 @@ class WithFixtures:
                 return bound_f
             return fixture
         if fx := tester._fixtures.get(name):
-            fx_bound = WithFixtures(tester, fx)
+            fx_bound = Fixtures(tester, fx)
             if inspect.isgeneratorfunction(fx):
                 return ArgsCollectingContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
@@ -129,7 +129,9 @@ class WithFixtures:
                 raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
 
 
-def fixtures_tests(self_test):
+def testing_fixtures(self_test):
+    from .binder import Binder
+    self_test = self_test.getChild(hooks=(Fixtures, Binder))
 
     trace = []
 
@@ -154,13 +156,9 @@ def fixtures_tests(self_test):
         assert 11 == b
         trace.append("test_a done")
 
-    @self_test
-    def test_run_with_fixtures():
-        WithFixtures(self_test, test_a)(9, b=11)
-        assert ['A start', 'A start', 'B start', 'test_a done', 'B end', 'A end', 'A end'] == trace, trace
-
 
     fixture_lifetime = []
+
 
     @self_test.fixture
     def fixture_A():
@@ -624,10 +622,71 @@ def fixtures_tests(self_test):
             @self_test
             async def this_is_a_nested_async_test():
                 done[1] = True
-                @self_test2
+                @self_test
                 async def this_is_a_doubly_nested_async_test():
                     done[2] = True
 
         self_test.all(done)
+
+
+    # define, test and install default fixture
+    # do not use @test.fixture as we need to install this twice
+    def raises(exception=Exception, message=None):
+        AUTOTEST_INTERNAL = 1
+        try:
+            yield
+        except exception as e:
+            if message and message != str(e):
+                raise AssertionError(f"should raise {exception.__name__} with message '{message}'") from e
+        except BaseException as e:
+            raise AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}").with_traceback(e.__traceback__) from e
+        else:
+            e = AssertionError(f"should raise {exception.__name__}")
+            e.__suppress_context__ = True
+            raise e
+    self_test.fixture(raises)
+
+
+    @self_test
+    def assert_raises():
+        with self_test.raises:
+            raise Exception
+        try:
+            with self_test.raises:
+                pass
+        except AssertionError as e:
+            assert 'should raise Exception' == str(e), e
+
+
+    @self_test
+    def assert_raises_specific_exception():
+        with self_test.raises(KeyError):
+            raise KeyError
+        try:
+            with self_test.raises(KeyError):
+                raise RuntimeError('oops')
+        except AssertionError as e:
+            assert 'should raise KeyError but raised RuntimeError' == str(e), str(e)
+        try:
+            with self_test.raises(KeyError):
+                pass
+        except AssertionError as e:
+            assert 'should raise KeyError' == str(e), e
+
+
+    @self_test
+    def assert_raises_specific_message():
+        with self_test.raises(RuntimeError, "hey man!"):
+            raise RuntimeError("hey man!")
+        try:
+            with self_test.raises(RuntimeError, "hey woman!"):
+                raise RuntimeError("hey man!")
+        except AssertionError as e:
+            assert "should raise RuntimeError with message 'hey woman!'" == str(e)
+
+    @self_test
+    def assert_raises_as_fixture(raises:KeyError):
+        {}[0]
+
 
 
