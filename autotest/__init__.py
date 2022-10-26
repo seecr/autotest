@@ -45,10 +45,13 @@ operators_test(self_test)
 from .fixtures import fixtures_hook, fixtures_test, std_fixtures
 fixtures_test(self_test)
 
+from .asyncer import async_hook, async_test
+async_test(self_test)
+
 
 test = Runner(
         # order of hook matters
-        hooks = (operators_hook, fixtures_hook, levels_hook, wildcard_hook, binder_hook),
+        hooks = (operators_hook, async_hook, fixtures_hook, levels_hook, wildcard_hook, binder_hook),
         fixtures = std_fixtures,
     )
 
@@ -98,18 +101,31 @@ def root_tester_assembly():
     def critical_test():
         assert 1 == 2
 
+    # async hook (elaborate on nested stuff)
+    N = [0]
+    @test.fixture
+    async def nine():
+        yield ['borg 1', 'borg 2', 'borg 3', 'borg 4', 'borg 5', 'borg 6', 'Annika Hansen', 'borg 8', 'borg 9']
+    @test.fixture
+    async def seven_of_nine(nine):
+        yield nine[7-1]
+    @test
+    async def the_9(nine):
+        assert len(nine) == 9
+        N[0] += 1
+    @test
+    async def is_seven_of_nine(seven_of_nine):
+        assert seven_of_nine == 'Annika Hansen'
+        N[0] += 1
+
+    assert N[0] == 2, N
+    assert dict(found=6, run=5) == test.stats, test.stats
+
 
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 89, 'run': 83}, self_test._stats)
-
-
-
-
-
-
-
+    self_test.eq({'found': 89, 'run': 83}, self_test.stats)
 
 
 

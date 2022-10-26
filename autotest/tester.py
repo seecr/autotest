@@ -109,7 +109,7 @@ class Runner: # aka Tester
         else:
             self._name = name
             self._options = collections.ChainMap(options, defaults)
-        self._stats = collections.Counter()
+        self.stats = collections.Counter()
         self._loghandlers = []
 
 
@@ -125,7 +125,7 @@ class Runner: # aka Tester
 
 
     def _stat(self, key):
-        self._stats[key] += 1
+        self.stats[key] += 1
         if p := self._parent:
             p._stat(key)
 
@@ -164,7 +164,7 @@ class Runner: # aka Tester
 
 
     def _log_stats(self):
-        self.handle(self._create_logrecord(None, ', '.join(f'{k}: {v}' for k, v in self._stats.most_common())))
+        self.handle(self._create_logrecord(None, ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
 
 
     def __getattr__(self, name):

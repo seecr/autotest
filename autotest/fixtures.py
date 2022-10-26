@@ -43,7 +43,7 @@ class _Fixtures:
                 """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
                    That value is used as argument to functions declaring the fixture in their args. """
                 assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
-                bound_f = bind_1_frame_back(func)
+                bound_f = bind_1_frame_back(func)  # TODO extract/move to binder?
                 add_fixture(tester, bound_f)
                 return bound_f
             return fixture
@@ -60,25 +60,7 @@ class _Fixtures:
     def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
         if inspect.iscoroutinefunction(self.func):
-            coro = self.async_run_with_fixtures(*args, **kwds)
-
-            # dit deel moet naar Runner
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                return asyncio.run(coro, debug=self.runner._options.get('debug'))
-            else:
-                """ we get called by sync code (a decorator during def) which in turn
-                    is called from async code. The only way to run this async test
-                    is in a new event loop (in another thread) """
-                t = threading.Thread(target=asyncio.run, args=(coro,),
-                        kwargs={'debug': self.runner._options.get('debug')})
-                t.start()
-                t.join()
-                return
-            # tot hier of zo
-
-
+            return self.async_run_with_fixtures(*args, **kwds)
         else:
             with contextlib.ExitStack() as contextmgrstack:
                 # we could use the timeout here too, with a signal handler TODO
@@ -638,22 +620,24 @@ def fixtures_test(self_test):
         assert True
 
 
-    class nested_async_tests:
+    # below is an extra test to assure fixtures work with nested async funcs
+    from .asyncer import async_hook
+    with self_test.child(hooks=[async_hook]) as atest:
         done = [False, False, False]
 
-        @self_test
+        @atest
         async def this_is_an_async_test():
             done[0] = True
             """ A decorator is always called synchronously, so it can't call the async test
                 because an event loop is already running. Solution is to start a new loop."""
-            @self_test
+            @atest
             async def this_is_a_nested_async_test():
                 done[1] = True
-                @self_test
+                @atest
                 async def this_is_a_doubly_nested_async_test():
                     done[2] = True
 
-        self_test.all(done)
+            atest.all(done)
 
 
     @self_test
