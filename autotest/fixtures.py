@@ -14,6 +14,9 @@ from .utils import bind_1_frame_back # redefine placeholder
 from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
+__all__ = ['Fixtures', 'testing_fixtures', 'std_fixtures']
+
+
 def get_fixture(runner, name):
     for value in runner._option('fixtures'):
         if name in value:
@@ -25,7 +28,7 @@ def add_fixture(runner, func):
 
 
 # redefine the placeholder with support for fixtures
-class Fixtures:
+class _Fixtures:
     """ Activates all fixtures recursively, then runs the test function. """
 
     def __init__(self, runner, func):
@@ -45,7 +48,7 @@ class Fixtures:
                 return bound_f
             return fixture
         if fx := get_fixture(tester, name): # tester._fixtures.get(name):
-            fx_bound = Fixtures(tester, fx)
+            fx_bound = _Fixtures(tester, fx)
             if inspect.isgeneratorfunction(fx):
                 return ArgsCollectingContextManager(fx_bound)
             if inspect.isasyncgenfunction(fx):
@@ -138,9 +141,73 @@ class Fixtures:
                 raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
 
 
-def testing_fixtures(self_test):
-    from .binder import Binder
-    self_test = self_test.getChild(hooks=(Fixtures, Binder))
+fixtures_hook = _Fixtures
+
+
+# some general purpose standard fixtures
+
+def tmp_path(name=None):
+    with tempfile.TemporaryDirectory() as p:
+        p = pathlib.Path(p)
+        if name:
+            yield p/name
+        else:
+            yield p
+
+
+def _capture(name):
+    """ captures output from child processes as well """
+    org_stream = getattr(sys, name)
+    org_fd = org_stream.fileno()
+    org_fd_backup = os.dup(org_fd)
+    replacement = tempfile.TemporaryFile(mode="w+t", buffering=1)
+    os.dup2(replacement.fileno(), org_fd)
+    setattr(sys, name, replacement)
+    def getvalue():
+        replacement.flush()
+        replacement.seek(0)
+        return replacement.read()
+    replacement.getvalue = getvalue
+    try:
+        yield replacement
+    finally:
+        os.dup2(org_fd_backup, org_fd)
+        setattr(sys, name, org_stream)
+
+
+def stdout():
+    yield from _capture('stdout')
+
+
+def stderr():
+    yield from _capture('stderr')
+
+
+async def slow_callback_duration(s):
+    asyncio.get_running_loop().slow_callback_duration = s
+    yield
+
+
+def raises(exception=Exception, message=None):
+    try:
+        yield
+    except exception as e:
+        if message and message != str(e):
+            raise AssertionError(f"should raise {exception.__name__} with message '{message}'") from e
+    except BaseException as e:
+        raise AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}").with_traceback(e.__traceback__) from e
+    else:
+        e = AssertionError(f"should raise {exception.__name__}")
+        e.__suppress_context__ = True
+        raise e
+
+
+std_fixtures = {fx.__name__: fx for fx in [tmp_path, stdout, stderr, slow_callback_duration, raises]}
+
+
+def fixtures_test(self_test):
+    from .binder import binder_hook
+    self_test = self_test.getChild(hooks=(fixtures_hook, binder_hook), fixtures=std_fixtures)
 
     trace = []
 
@@ -262,17 +329,6 @@ def testing_fixtures(self_test):
             self_test.eq(252, fixture_C)
 
 
-
-    def tmp_path(name=None):
-        with tempfile.TemporaryDirectory() as p:
-            p = pathlib.Path(p)
-            if name:
-                yield p/name
-            else:
-                yield p
-    self_test.fixture(tmp_path)
-
-
     class tmp_files:
 
         path = [None]
@@ -299,44 +355,6 @@ def testing_fixtures(self_test):
             assert str(tmp_path).endswith('/aap')
             tmp_path.write_text('hi monkey')
             assert tmp_path.exists()
-
-
-    def capture(name):
-        """ captures output from child processes as well """
-        org_stream = getattr(sys, name)
-        org_fd = org_stream.fileno()
-        org_fd_backup = os.dup(org_fd)
-        replacement = tempfile.TemporaryFile(mode="w+t", buffering=1)
-        os.dup2(replacement.fileno(), org_fd)
-        setattr(sys, name, replacement)
-        def getvalue():
-            replacement.flush()
-            replacement.seek(0)
-            return replacement.read()
-        replacement.getvalue = getvalue
-        try:
-            yield replacement
-        finally:
-            os.dup2(org_fd_backup, org_fd)
-            setattr(sys, name, org_stream)
-
-
-    # do not use @self_test.fixture as we need to install this twice
-    def stdout():
-        yield from capture('stdout')
-    self_test.fixture(stdout)
-
-
-    # do not use @test.fixture as we need to install this twice
-    def stderr():
-        yield from capture('stderr')
-    self_test.fixture(stderr)
-
-
-    @self_test.fixture
-    async def slow_callback_duration(s):
-        asyncio.get_running_loop().slow_callback_duration = s
-        yield
 
 
     @self_test
@@ -636,24 +654,6 @@ def testing_fixtures(self_test):
                     done[2] = True
 
         self_test.all(done)
-
-
-    # define, test and install default fixture
-    # do not use @test.fixture as we need to install this twice
-    def raises(exception=Exception, message=None):
-        AUTOTEST_INTERNAL = 1
-        try:
-            yield
-        except exception as e:
-            if message and message != str(e):
-                raise AssertionError(f"should raise {exception.__name__} with message '{message}'") from e
-        except BaseException as e:
-            raise AssertionError(f"should raise {exception.__name__} but raised {type(e).__name__}").with_traceback(e.__traceback__) from e
-        else:
-            e = AssertionError(f"should raise {exception.__name__}")
-            e.__suppress_context__ = True
-            raise e
-    self_test.fixture(raises)
 
 
     @self_test

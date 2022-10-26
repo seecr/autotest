@@ -28,31 +28,75 @@
 
 
 
-from .tester import self_test
+from .tester import Runner, self_test
 
-from .wildcard import Wildcard, testing_wildcard
-testing_wildcard(self_test)
+from .wildcard import wildcard_hook, wildcard_test
+wildcard_test(self_test)
 
-from .binder import Binder, testing_binder
-testing_binder(self_test)
+from .binder import binder_hook, binder_test
+binder_test(self_test)
 
-from .levels import Levels, testing_levels
-testing_levels(self_test)
+from .levels import levels_hook, levels_test
+levels_test(self_test)
 
-from .operators import Operators, testing_operators
-testing_operators(self_test)
+from .operators import operators_hook, operators_test
+operators_test(self_test)
 
-from .fixtures import Fixtures, testing_fixtures
-testing_fixtures(self_test)
+from .fixtures import fixtures_hook, fixtures_test, std_fixtures
+fixtures_test(self_test)
 
 
-#assert len(self_test._options.get('hooks')) == 1
-#assert len(self_test2._options.get('hooks')) == 2
-#hooks = list(self_test2._hooks())
-#assert hooks[0] == binder, hooks[0]
-#assert hooks[1] == WithFixtures, hooks[1]
-#assert hooks[2].__class__ == OperatorLookup, hooks[2]
-#assert len(hooks) == 3
+test = Runner(
+        # order of hook matters
+        hooks = (operators_hook, fixtures_hook, levels_hook, wildcard_hook, binder_hook),
+        fixtures = std_fixtures,
+    )
+
+
+@test
+def root_tester_assembly():
+    """ only test if the root tester is assembled with all hooks """
+
+    # operators_hook
+    test.eq(1, 1)
+    test.isinstance({}, dict)
+    test.endswith("aap", "ap")
+
+    # fixtures hook
+    @test.fixture
+    def forty_two():
+        yield 42
+    @test
+    def is_forty_two(forty_two):
+        assert forty_two == 42
+    with test.forty_two as contextmanager:
+        assert contextmanager == 42
+
+    # standard fixtures
+    with test.tmp_path as p:
+        test.truth(p.exists())
+    with test.stdout as e:
+        print("one")
+        assert e.getvalue() == 'one\n'
+    with test.stderr as e:
+        import sys
+        print("two", file=sys.stderr)
+        assert e.getvalue() == 'two\n'
+
+    # binding hook
+    class A:
+        a = 42
+        @test
+        def bind():
+            assert a == 42
+
+    # wildcard hook
+    test.eq(test.any(int), 42)
+
+    # levels hook
+    @test.performance
+    def critical_test():
+        assert 1 == 2
 
 
 

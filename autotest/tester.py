@@ -184,10 +184,10 @@ class any_number:
         return isinstance(rhs, Number) and self._lo <= rhs <= self._hi
 
 
-from .operators import Operators
+from .operators import operators_hook
 
 self_test = Runner('autotest-self-tests',
-        hooks=(Operators(),)) # separate runner for bootstrapping/self testing
+        hooks=(operators_hook,)) # separate runner for bootstrapping/self testing
 
 
 @self_test

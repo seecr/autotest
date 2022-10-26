@@ -1,11 +1,16 @@
 
 from .utils import bind_1_frame_back # redefine placeholder
-def Binder(self, func):
-    return bind_1_frame_back(func)
+
+class _Binder:
+    def __call__(self, runner, func):
+        return bind_1_frame_back(func)
 
 
-def testing_binder(self_test):
-    self_test2 = self_test.getChild(hooks=(Binder,))
+binder_hook = _Binder()
+
+
+def binder_test(self_test):
+    self_test2 = self_test.getChild(hooks=(binder_hook,))
     with self_test2.child() as tst:
         @tst
         def nested_defaults():

@@ -7,7 +7,7 @@ PERFORMANCE = logging.INFO
 NOTSET      = logging.NOTSET
 
 
-class Levels:
+class _Levels:
 
     def __call__(self, tester, func):
         level = tester._options.get('level', UNIT)
@@ -29,8 +29,11 @@ class Levels:
         raise AttributeError
 
 
-def testing_levels(self_test):
-    with self_test.child(hooks=(Levels(),)) as test:
+levels_hook = _Levels()
+
+
+def levels_test(self_test):
+    with self_test.child(hooks=(levels_hook,)) as test:
         runs = [None, None]
         with test.child('tst', level=CRITICAL) as tst:
             @tst.critical

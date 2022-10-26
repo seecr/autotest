@@ -2,7 +2,7 @@
 import operator         # operators for asserting
 import builtins         # operators for asserting
 
-class Operators:
+class _Operators:
 
     def __call__(self, tester, f):
         return f
@@ -29,7 +29,11 @@ class Operators:
         return call_operator
 
 
-def testing_operators(self_test):
+operators_hook = _Operators()
+
+
+def operators_test(self_test):
+    self_test.getChild(hooks=(operators_hook,))
 
     @self_test
     def test_isinstance():
