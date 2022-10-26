@@ -23,11 +23,6 @@
 
 
 
-#TODO
-#sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
-
-
-
 from .tester import Runner, self_test
 
 from .wildcard import wildcard_hook, wildcard_test
@@ -49,16 +44,24 @@ from .asyncer import async_hook, async_test
 async_test(self_test)
 
 
-test = Runner(
-        # order of hook matters
+@self_test
+def check_stats():
+    self_test.eq({'found': 87, 'run': 81}, self_test.stats)
+
+
+
+def assemble_root_runner():
+    return Runner(
+        # order of hook matters, processed from right to left
         hooks = (operators_hook, async_hook, fixtures_hook, levels_hook, wildcard_hook, binder_hook),
         fixtures = std_fixtures,
     )
 
 
-@test
-def root_tester_assembly():
+def root_tester_assembly_test(test):
     """ only test if the root tester is assembled with all hooks """
+
+    N = [0]
 
     # operators_hook
     test.eq(1, 1)
@@ -72,6 +75,7 @@ def root_tester_assembly():
     @test
     def is_forty_two(forty_two):
         assert forty_two == 42
+        N[0] += 1
     with test.forty_two as contextmanager:
         assert contextmanager == 42
 
@@ -92,17 +96,21 @@ def root_tester_assembly():
         @test
         def bind():
             assert a == 42
+            N[0] += 1
 
     # wildcard hook
     test.eq(test.any(int), 42)
 
     # levels hook
     @test.performance
+    def performance_test():
+        assert "not" == "executed"
+    @test.critical
     def critical_test():
-        assert 1 == 2
+        assert 1 == 1
+        N[0] += 1
 
     # async hook (elaborate on nested stuff)
-    N = [0]
     @test.fixture
     async def nine():
         yield ['borg 1', 'borg 2', 'borg 3', 'borg 4', 'borg 5', 'borg 6', 'Annika Hansen', 'borg 8', 'borg 9']
@@ -118,21 +126,21 @@ def root_tester_assembly():
         assert seven_of_nine == 'Annika Hansen'
         N[0] += 1
 
-    assert N[0] == 2, N
+    assert N[0] == 5, N
     assert dict(found=6, run=5) == test.stats, test.stats
+
+
+root_tester_assembly_test(assemble_root_runner())
+
+root = assemble_root_runner()
+
+
+
+# HIER VERDER
 
 
 
 @self_test
-def check_stats():
-    self_test.eq({'found': 89, 'run': 83}, self_test.stats)
-
-
-
-
-
-
-@test
 def setup_correct(tmp_path):
     autotest_dev_dir = pathlib.Path(__file__).parent.resolve().parent
     if not (autotest_dev_dir/'bin/autotest').exists():
@@ -189,4 +197,6 @@ def mock_object(*functions, **more):
     self = mock.Mock()
     self.configure_mock(**{f.__name__: types.MethodType(f, self) for f in functions}, **more)
     return self
+
+
 

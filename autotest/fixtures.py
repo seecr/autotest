@@ -10,7 +10,7 @@ import sys
 import os
 
 from .utils import asyncio_filtering_exception_handler, ensure_async_generator_func
-from .utils import bind_1_frame_back # redefine placeholder
+from .utils import bind_1_frame_back
 from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
@@ -38,16 +38,15 @@ class _Fixtures:
 
     @classmethod
     def lookup(clz, tester, name):
+        """ supports looking up fixtues as test.<fixture> and setting them with @test.fixture """
         if name == 'fixture':
             def fixture(func):
-                """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
-                   That value is used as argument to functions declaring the fixture in their args. """
                 assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
-                bound_f = bind_1_frame_back(func)  # TODO extract/move to binder?
+                bound_f = bind_1_frame_back(func)  # TODO extract/move to binder? how?
                 add_fixture(tester, bound_f)
                 return bound_f
             return fixture
-        if fx := get_fixture(tester, name): # tester._fixtures.get(name):
+        elif fx := get_fixture(tester, name): # tester._fixtures.get(name):
             fx_bound = _Fixtures(tester, fx)
             if inspect.isgeneratorfunction(fx):
                 return ArgsCollectingContextManager(fx_bound)

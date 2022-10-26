@@ -3,6 +3,11 @@ import pdb
 import sys
 
 
+#TODO
+#sys_defaults.update({k[len('AUTOTEST_'):]: eval(v) for k, v in os.environ.items() if k.startswith('AUTOTEST_')})
+
+
+
 def post_mortem(tb, *cmds):
     """ for when you use plain assert, it'll throw you in Pdb on failure """
     p = pdb.Pdb()
