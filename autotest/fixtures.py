@@ -45,8 +45,6 @@ class Fixtures:
 
     def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
-
-
         if inspect.iscoroutinefunction(self.func):
             coro = self.async_run_with_fixtures(*args, **kwds)
 

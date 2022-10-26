@@ -3,15 +3,19 @@ def any(_): # name is included in diffs
     return True
 
 
-class wildcard:
+class Any:
     def __init__(self, f=any):
         self.f = f
+
     def __eq__(self, x):
         return bool(self.f(x))
+
     def __call__(self, f):
-        return wildcard(f)
+        return Any(f)
+
     def __repr__(self):
         return self.f.__name__  + '(...)' if self.f else '*'
+
 
 class Wildcard:
 
@@ -20,7 +24,7 @@ class Wildcard:
 
     def lookup(self, tester, name):
         if name == 'any':
-            return wildcard()
+            return Any()
         raise AttributeError
 
 

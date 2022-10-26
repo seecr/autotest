@@ -45,6 +45,7 @@ testing_operators(self_test)
 from .fixtures import Fixtures, testing_fixtures
 testing_fixtures(self_test)
 
+
 #assert len(self_test._options.get('hooks')) == 1
 #assert len(self_test2._options.get('hooks')) == 2
 #hooks = list(self_test2._hooks())

@@ -16,7 +16,6 @@ import contextlib       # child as context
 import difflib          # show diffs on failed tests with two args
 import pprint           # show diffs on failed tests with two args
 import collections      # chain maps for hierarchical Runners and Counter
-import operator         # not
 import logging          # output to logger
 
 
@@ -116,10 +115,11 @@ class Runner: # aka Tester
         self._loghandlers = []
 
 
-    def _hooks(self):
+    def _option(self, name):
+        """ concat sequences of option from parents """
         for m in self._options.maps:
-            for hook in reversed(m.get('hooks', ())):
-                yield hook
+            for value in reversed(m.get(name, ())):
+                yield value
 
 
     def _stat(self, key):
@@ -149,9 +149,7 @@ class Runner: # aka Tester
         skip = self._options.get('skip')
         orig_test_func = test_func
         # TODO make conditions nicer
-        print(" == hooking == ")
-        for hook in self._hooks():
-            print(" == HOOK:", hook)
+        for hook in self._option('hooks'):
             test_func = hook(self, test_func)
             if not test_func:
                 break
@@ -168,7 +166,7 @@ class Runner: # aka Tester
 
 
     def __getattr__(self, name):
-        for hook in self._hooks():
+        for hook in self._option('hooks'):
             try:
                 return hook.lookup(self, name)
             except AttributeError:
