@@ -105,11 +105,9 @@ class Runner: # aka Tester
         self._parent = parent
         if parent:
             self._name = parent._name + '.' + name if name else parent._name
-            self._fixtures = parent._fixtures.new_child()
             self._options = parent._options.new_child(m=options)
         else:
             self._name = name
-            self._fixtures = collections.ChainMap()
             self._options = collections.ChainMap(options, defaults)
         self._stats = collections.Counter()
         self._loghandlers = []
@@ -118,7 +116,11 @@ class Runner: # aka Tester
     def _option(self, name):
         """ concat sequences of option from parents """
         for m in self._options.maps:
-            for value in reversed(m.get(name, ())):
+            value = m.get(name)
+            if isinstance(value, (list, tuple)):
+                for value in reversed(value):
+                    yield value
+            elif value:
                 yield value
 
 
@@ -143,7 +145,7 @@ class Runner: # aka Tester
 
 
     def _run(self, test_func, *app_args, **app_kwds):
-        """ Binds f to stack vars and fixtures and runs it. """
+        """ Runs hooks and and runs result. """
         AUTOTEST_INTERNAL = 1
         self._stat('found')
         skip = self._options.get('skip')
@@ -395,7 +397,7 @@ def stringio_handler():
 
 def logging_runner(name):
     s, myhandler = stringio_handler()
-    tester = Runner(name) # No hooks for operators and fixtures
+    tester = Runner(name) # No hooks
     tester.addHandler(myhandler)
     return tester, s
 

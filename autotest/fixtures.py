@@ -14,6 +14,16 @@ from .utils import bind_1_frame_back # redefine placeholder
 from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
+def get_fixture(runner, name):
+    for value in runner._option('fixtures'):
+        if name in value:
+            return value[name]
+
+
+def add_fixture(runner, func):
+    runner._options.maps[0].setdefault('fixtures', {})[func.__name__] = func
+
+
 # redefine the placeholder with support for fixtures
 class Fixtures:
     """ Activates all fixtures recursively, then runs the test function. """
@@ -24,17 +34,17 @@ class Fixtures:
 
 
     @classmethod
-    def lookup(self, tester, name):
+    def lookup(clz, tester, name):
         if name == 'fixture':
             def fixture(func):
                 """Decorator for fixtures a la pytest. A fixture is a generator yielding exactly 1 value.
                    That value is used as argument to functions declaring the fixture in their args. """
                 assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
                 bound_f = bind_1_frame_back(func)
-                tester._fixtures[func.__name__] = bound_f
+                add_fixture(tester, bound_f)
                 return bound_f
             return fixture
-        if fx := tester._fixtures.get(name):
+        if fx := get_fixture(tester, name): # tester._fixtures.get(name):
             fx_bound = Fixtures(tester, fx)
             if inspect.isgeneratorfunction(fx):
                 return ArgsCollectingContextManager(fx_bound)
@@ -42,6 +52,7 @@ class Fixtures:
                 return ArgsCollectingAsyncContextManager(fx_bound)
             raise ValueError(f"not an (async) generator: {fx}")
         raise AttributeError
+
 
     def __call__(self, *args, **kwds):
         AUTOTEST_INTERNAL = 1
@@ -78,8 +89,8 @@ class Fixtures:
             a = () if p.annotation == inspect.Parameter.empty else p.annotation
             assert p.default == inspect.Parameter.empty, f"Use {p.name}:{p.default} instead of {p.name}={p.default}"
             return a if isinstance(a, tuple) else (a,)
-        return [(self.runner._fixtures[name], args(p)) for name, p in inspect.signature(f).parameters.items()
-                if name in self.runner._fixtures and name not in except_for]
+        return [(get_fixture(self.runner, name), args(p)) for name, p in inspect.signature(f).parameters.items()
+                if get_fixture(self.runner, name) and name not in except_for]
 
 
     # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
@@ -354,7 +365,7 @@ def testing_fixtures(self_test):
             def temporary_fixture():
                 yield "tmp one"
             with t.temporary_fixture as tf1:
-                assert "tmp one" == tf1
+                assert "tmp one" == tf1, tf1
             with self_test.child():
                 @self_test.fixture
                 def temporary_fixture():
@@ -362,7 +373,7 @@ def testing_fixtures(self_test):
                 with self_test.temporary_fixture as tf2:
                     assert "tmp two" == tf2
             with t.temporary_fixture as tf1:
-                assert "tmp one" == tf1
+                assert "tmp one" == tf1, tf1
         try:
             self_test.temporary_fixture
         except AttributeError:
