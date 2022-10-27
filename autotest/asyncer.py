@@ -14,10 +14,9 @@ thread = concurrent.futures.ThreadPoolExecutor(max_workers=10).submit
 
 def async_hook(runner, func):
     def may_be_async(*a, **k):
-        AUTOTEST_INTERNAL = 1
         coro_or_result = func(*a, **k)
         if inspect.iscoroutine(coro_or_result):
-            thread(asyncio.run, coro_or_result, debug=runner._options.get('debug')).result()
+            thread(asyncio.run, coro_or_result, debug=runner.option_get('debug')).result()
         else:
             return coro_or_result
     return may_be_async

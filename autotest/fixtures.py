@@ -4,7 +4,6 @@ import pathlib
 import inspect
 import asyncio
 import contextlib
-import threading        # run nested async tests in thread
 import asyncio          # support for async test and fixtures
 import sys
 import os
@@ -18,13 +17,15 @@ __all__ = ['Fixtures', 'testing_fixtures', 'std_fixtures']
 
 
 def get_fixture(runner, name):
-    for value in runner._option('fixtures'):
-        if name in value:
-            return value[name]
+    """ find fixture in hierarchical maps """
+    for map in runner.option_enumerate('fixtures'):
+        if name in map:
+            return map[name]
 
 
 def add_fixture(runner, func):
-    runner._options.maps[0].setdefault('fixtures', {})[func.__name__] = func
+    """ add fixture to leaf map """
+    runner.option_setdefault('fixtures', {})[func.__name__] = func
 
 
 # redefine the placeholder with support for fixtures
@@ -105,7 +106,7 @@ class _Fixtures:
 
     async def async_run_with_fixtures(self, *args, **kwargs):
         AUTOTEST_INTERNAL = 1
-        timeout = self.runner._options.get('timeout')
+        timeout = self.runner.option_get('timeout')
         async with contextlib.AsyncExitStack() as contextmgrstack:
             result = await self.async_run_recursively(self.func, contextmgrstack, *args, **kwargs)
             assert inspect.iscoroutine(result)

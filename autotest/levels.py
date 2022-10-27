@@ -10,8 +10,8 @@ NOTSET      = logging.NOTSET
 class _Levels:
 
     def __call__(self, tester, func):
-        level = tester._options.get('level', UNIT)
-        plevel = tester._parent._options.get('level', UNIT) if tester._parent else UNIT
+        level = tester.option_get('level', UNIT)
+        plevel = tester._parent.option_get('level', UNIT) if tester._parent else UNIT
         skip = level < plevel
         if skip:
             return None

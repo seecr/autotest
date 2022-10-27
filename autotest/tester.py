@@ -38,7 +38,7 @@ class Runner: # aka Tester
     """ Main tool for running tests across modules and programs. """
 
     def __call__(self, *functions, **options):
-        """Runs tests, with options; usefull as decorator. """
+        """Runs tests, with options; useful as decorator. """
         AUTOTEST_INTERNAL = 1
         if functions and options:
             return self(**options)(*functions)
@@ -80,7 +80,7 @@ class Runner: # aka Tester
 
     def diff(self, a, b, ff=None):
         """ Produces diff of textual representation of a and b. """
-        ff = ff if ff else self._options.get('format')
+        ff = ff if ff else self.option_get('format')
         return '\n' + '\n'.join(
                     difflib.ndiff(
                         format(a).splitlines(),
@@ -113,13 +113,20 @@ class Runner: # aka Tester
         self._loghandlers = []
 
 
-    def _option(self, name):
-        """ concat sequences of option from parents """
+    def option_get(self, name, default=None):
+        return self._options.get(name, default)
+
+
+    def option_setdefault(self, name, default):
+        return self._options.maps[0].setdefault(name, default)
+
+
+    def option_enumerate(self, name):
+        """ enumerate options from parents, flattening sequences """
         for m in self._options.maps:
             value = m.get(name)
             if isinstance(value, (list, tuple)):
-                for value in reversed(value):
-                    yield value
+                yield from reversed(value)
             elif value:
                 yield value
 
@@ -133,7 +140,7 @@ class Runner: # aka Tester
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
             self._name,                               # name of logger
-            self._options.get('level', 40),               # log level   #TODO
+            self.option_get('level', 40),             # log level   #TODO
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -148,10 +155,10 @@ class Runner: # aka Tester
         """ Runs hooks and and runs result. """
         AUTOTEST_INTERNAL = 1
         self._stat('found')
-        skip = self._options.get('skip')
+        skip = self.option_get('skip')
         orig_test_func = test_func
         # TODO make conditions nicer
-        for hook in self._option('hooks'):
+        for hook in self.option_enumerate('hooks'):
             test_func = hook(self, test_func)
             if not test_func:
                 break
@@ -160,7 +167,7 @@ class Runner: # aka Tester
                 self._stat('run')
                 self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
                 test_func(*app_args, **app_kwds)
-        return orig_test_func if self._options.get('keep') else None
+        return orig_test_func if self.option_get('keep') else None
 
 
     def _log_stats(self):
@@ -168,7 +175,7 @@ class Runner: # aka Tester
 
 
     def __getattr__(self, name):
-        for hook in self._option('hooks'):
+        for hook in self.option_enumerate('hooks'):
             try:
                 return hook.lookup(self, name)
             except AttributeError:
@@ -283,9 +290,9 @@ def combine_test_with_options():
     trace = []
     @self_test(keep=True, my_opt=42)
     def f0():
-        trace.append(self_test._options.get('my_opt'))
+        trace.append(self_test.option_get('my_opt'))
     def f1(): # ordinary function; the only difference, here(!) is binding
-        trace.append(self_test._options.get('my_opt'))
+        trace.append(self_test.option_get('my_opt'))
     self_test(f0)
     self_test(f0, my_opt=76)
     self_test(f0, f1, my_opt=93)
