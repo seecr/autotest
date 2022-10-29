@@ -25,6 +25,9 @@
 
 from .tester import Runner, self_test
 
+from .prrint import prrint_test
+prrint_test(self_test)
+
 from .wildcard import wildcard_hook, wildcard_test
 wildcard_test(self_test)
 
@@ -43,17 +46,19 @@ fixtures_test(self_test)
 from .asyncer import async_hook, async_test
 async_test(self_test)
 
+from .diffs import diff_hook, diff_test
+diff_test(self_test)
+
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 87, 'run': 81}, self_test.stats)
-
+    self_test.eq({'found': 101, 'run': 95}, self_test.stats)
 
 
 def assemble_root_runner():
     return Runner(
         # order of hook matters, processed from right to left
-        hooks = (operators_hook, async_hook, fixtures_hook, levels_hook, wildcard_hook, binder_hook),
+        hooks = (operators_hook, async_hook, fixtures_hook, diff_hook, levels_hook, wildcard_hook, binder_hook),
         fixtures = std_fixtures,
     )
 
@@ -129,6 +134,17 @@ def root_tester_assembly_test(test):
     assert N[0] == 5, N
     assert dict(found=6, run=5) == test.stats, test.stats
 
+    # diff hook
+    try:
+        test.eq(1, 2, diff=test.diff)
+    except AssertionError as e:
+        assert str(e) == '\n- 1\n+ 2'
+    try:
+        test.eq(1, 2, diff=test.diff2)
+    except AssertionError as e:
+        assert str(e) == '\n- 1\n+ 2'
+
+
 
 root_tester_assembly_test(assemble_root_runner())
 
@@ -141,25 +157,30 @@ root = assemble_root_runner()
 
 
 @self_test
-def setup_correct(tmp_path):
-    autotest_dev_dir = pathlib.Path(__file__).parent.resolve().parent
-    if not (autotest_dev_dir/'bin/autotest').exists():
-        # Not dev dir
-        return
-    import subprocess
-    version_process = subprocess.run(['python3', 'setup.py', '--version'],
-            capture_output=True,
-            text=True,
-            cwd=str(autotest_dev_dir),
-        )
-    version = version_process.stdout.strip()
-    result = subprocess.run(['python3', 'setup.py', 'sdist', '--dist-dir', str(tmp_path)],
-            capture_output=True,
-            cwd=str(autotest_dev_dir))
+def setup_correct():
+    import tempfile
+    import pathlib
+    with tempfile.TemporaryDirectory() as p:
+        tmp = pathlib.Path(p)
+        autotest_dev_dir = pathlib.Path(__file__).parent.resolve().parent
+        if not (autotest_dev_dir/'bin/autotest').exists():
+            # Not dev dir
+            return
+        import subprocess
+        version_process = subprocess.run(['python3', 'setup.py', '--version'],
+                capture_output=True,
+                text=True,
+                cwd=str(autotest_dev_dir),
+            )
+        version = version_process.stdout.strip()
+        result = subprocess.run(['python3', 'setup.py', 'sdist', '--dist-dir', str(tmp)],
+                capture_output=True,
+                cwd=str(autotest_dev_dir))
 
-    from tarfile import open
-    tf = open(name=tmp_path/f'autotest-{version}.tar.gz', mode='r:gz')
-    test.eq([f'autotest-{version}',
+        from tarfile import open
+        tf = open(name=tmp/f'autotest-{version}.tar.gz', mode='r:gz')
+        self_test.eq([
+             f'autotest-{version}',
              f'autotest-{version}/LICENSE',
              f'autotest-{version}/MANIFEST.in',
              f'autotest-{version}/PKG-INFO',
@@ -171,8 +192,14 @@ def setup_correct(tmp_path):
              f'autotest-{version}/autotest.egg-info/dependency_links.txt',
              f'autotest-{version}/autotest.egg-info/top_level.txt',
              f'autotest-{version}/autotest/__init__.py',
+             f'autotest-{version}/autotest/asyncer.py',
+             f'autotest-{version}/autotest/binder.py',
+             f'autotest-{version}/autotest/diffs.py',
+             f'autotest-{version}/autotest/fixtures.py',
+             f'autotest-{version}/autotest/levels.py',
              f'autotest-{version}/autotest/main.py',
              f'autotest-{version}/autotest/moretests.py',
+             f'autotest-{version}/autotest/operators.py',
              f'autotest-{version}/autotest/prrint.py',
              f'autotest-{version}/autotest/tester.py',
              f'autotest-{version}/autotest/tests',
@@ -180,13 +207,15 @@ def setup_correct(tmp_path):
              f'autotest-{version}/autotest/tests/sub_module_fail.py',
              f'autotest-{version}/autotest/tests/sub_module_ok.py',
              f'autotest-{version}/autotest/tests/temporary_class_namespace.py',
+             f'autotest-{version}/autotest/utils.py',
+             f'autotest-{version}/autotest/wildcard.py',
              f'autotest-{version}/bin',
              f'autotest-{version}/bin/autotest',
              f'autotest-{version}/setup.cfg',
              f'autotest-{version}/setup.py',
             ],
-            sorted(tf.getnames()), msg=test.diff)
-    tf.close()
+            sorted(tf.getnames()), diff=lambda a, b: set(a).symmetric_difference(set(b)))
+        tf.close()
 
 
 

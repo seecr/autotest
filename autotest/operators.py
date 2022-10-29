@@ -24,8 +24,10 @@ class _Operators:
                 args = args[1:]
             if truth(op(*args)):
                 return True
-            msg = (diff(*args),) if diff else (op.__name__,) + args
-            raise AssertionError(*msg)
+            if diff:
+                raise AssertionError(diff(*args))
+            else:
+                raise AssertionError(op.__name__, *args)
         return call_operator
 
 
@@ -33,7 +35,6 @@ operators_hook = _Operators()
 
 
 def operators_test(self_test):
-    self_test.getChild(hooks=(operators_hook,))
 
     @self_test
     def test_isinstance():

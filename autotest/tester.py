@@ -13,8 +13,6 @@
 
 import inspect          # for recognizing functions, generators etc
 import contextlib       # child as context
-import difflib          # show diffs on failed tests with two args
-import pprint           # show diffs on failed tests with two args
 import collections      # chain maps for hierarchical Runners and Counter
 import logging          # output to logger
 
@@ -30,7 +28,6 @@ defaults = dict(
     keep      = False,           # Ditch test functions after running
     timeout   = 2,               # asyncio task timeout
     debug     = True,            # use debug for asyncio.run
-    format    = pprint.pformat,  # set a function for formatting diffs on failures
 )
 
 
@@ -76,28 +73,6 @@ class Runner: # aka Tester
 
     def fail(self, *args, **kwds):
         raise AssertionError(*args, *(kwds,) if kwds else ())
-
-
-    def diff(self, a, b, ff=None):
-        """ Produces diff of textual representation of a and b. """
-        ff = ff if ff else self.option_get('format')
-        return '\n' + '\n'.join(
-                    difflib.ndiff(
-                        format(a).splitlines(),
-                        format(b).splitlines()))
-
-
-    @staticmethod
-    def diff2(a, b):
-        """ experimental, own formatting more suitable for difflib
-            deprecated, use option 'format=autotest.pformat' """
-        import autotest.prrint as prrint # late import so prrint can use autotest itself
-        return Tester.diff(a, b, ff=prrint.format)
-
-
-    def prrint(self, a):
-        import autotest.prrint as prrint # late import so prrint can use autotest itself
-        prrint.prrint(a)
 
 
     def __init__(self, name=None, parent=None, **options):
@@ -157,15 +132,14 @@ class Runner: # aka Tester
         self._stat('found')
         skip = self.option_get('skip')
         orig_test_func = test_func
-        # TODO make conditions nicer
         for hook in self.option_enumerate('hooks'):
-            test_func = hook(self, test_func)
-            if not test_func:
-                break
-        if test_func:
+            if not (test_func := hook(self, test_func)):
+                break # skip
+        else:
             if inspect.isfunction(skip) and not skip(test_func) or not skip:
                 self._stat('run')
                 self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
+                # TODO how to handle hook for diff?
                 test_func(*app_args, **app_kwds)
         return orig_test_func if self.option_get('keep') else None
 
@@ -329,69 +303,6 @@ def call_test_with_complete_context():
     assert a_test, a_test
     self_test(a_test)
 
-
-
-@self_test
-def idea_for_dumb_diffs():
-    # if you want a so called smart diff: the second arg of assert is meant for it.
-    # Runner supplies a generic diff between two pretty printed values
-    a = [7, 1, 2, 8, 3, 4]
-    b = [1, 2, 9, 3, 4, 6]
-    d = self_test.diff(a, b)
-    assert str == type(str(d))
-
-    try:
-        assert a == b, self_test.diff(a,b)
-    except AssertionError as e:
-        assert """
-- [7, 1, 2, 8, 3, 4]
-?  ---      ^
-
-+ [1, 2, 9, 3, 4, 6]
-?        ^      +++
-""" == str(e)
-
-
-    try:
-        self_test.eq(a, b, diff=self_test.diff)
-    except AssertionError as e:
-        assert """
-- [7, 1, 2, 8, 3, 4]
-?  ---      ^
-
-+ [1, 2, 9, 3, 4, 6]
-?        ^      +++
-""" == str(e), e
-
-
-    # use of a function from elswhere
-    a = set([7, 1, 2, 8, 3, 4])
-    b = set([1, 2, 9, 3, 4, 6])
-    try:
-        assert a == b, set.symmetric_difference(a, b)
-    except AssertionError as e:
-        assert "{6, 7, 8, 9}" == str(e), e
-    try:
-        self_test.eq(a, b, diff=set.symmetric_difference)
-    except AssertionError as e:
-        assert "{6, 7, 8, 9}" == str(e), e
-
-
-#@self_test2 # temp disable bc it cause system installed autotest import via diff2
-def diff2_sorting_including_uncomparables():
-    msg = """
-  {
-+   1,
--   <class 'dict'>:
-?           ^^^   ^
-
-+   <class 'str'>,
-?           ^ +  ^
-
--     <class 'bool'>,
-  }"""
-    with self_test2.raises(AssertionError, msg):
-        self_test2.eq({dict: bool}, {str, 1}, msg=self_test2.diff2)
 
 
 def stringio_handler():

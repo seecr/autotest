@@ -14,7 +14,7 @@ class _Levels:
         plevel = tester._parent.option_get('level', UNIT) if tester._parent else UNIT
         skip = level < plevel
         if skip:
-            return None
+            return
         return func
 
     def lookup(self, tester, name):

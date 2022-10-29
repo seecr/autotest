@@ -59,4 +59,3 @@ def binder_test(self_test):
     def dont_confuse_app_vars_with_internal_vars():
         assert 16 == f
 
-

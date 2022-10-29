@@ -104,39 +104,41 @@ def prrint(data):
     _format(data, Indenter(sys.stdout), seen=set(), sep='')
 
 
-#from autotest import test
-from tester import Runner, stdout
-test = Runner()
-test.fixture(stdout)
 
-@test
-def empty():
-    test.eq("[]\n", format([]))
-    test.eq("{}\n", format({}))
-    test.eq("''\n", format(""))
-    test.eq("()\n", format(()))
-    test.eq("set()\n", format(set()))
+def prrint_test(test):
+    from .fixtures import fixtures_hook, stdout
+    test = test.getChild(
+            hooks=[fixtures_hook],
+            fixtures={'stdout': stdout})
+
+    @test
+    def empty():
+        test.eq("[]\n", format([]))
+        test.eq("{}\n", format({}))
+        test.eq("''\n", format(""))
+        test.eq("()\n", format(()))
+        test.eq("set()\n", format(set()))
 
 
-@test
-def one_element():
-    test.eq("[\n  42,\n]\n", format([42]))
-    test.eq(
-"""{
+    @test
+    def one_element():
+        test.eq("[\n  42,\n]\n", format([42]))
+        test.eq(
+    """{
   1:
     'a',
 }
 """, format({1: "a"}))
-    test.eq("''\n", format(""))
-    test.eq("(\n  42,\n)\n", format((42,)))
-    test.eq("[\n  42,\n]\n", format([42]))
-    test.eq("{\n  42,\n}\n", format({42}))
+        test.eq("''\n", format(""))
+        test.eq("(\n  42,\n)\n", format((42,)))
+        test.eq("[\n  42,\n]\n", format([42]))
+        test.eq("{\n  42,\n}\n", format({42}))
 
 
-@test
-def separators():
-    x = format([1, (2,), {3:3}, {4}, [5]])
-    test.eq("""[
+    @test
+    def separators():
+        x = format([1, (2,), {3:3}, {4}, [5]])
+        test.eq("""[
   1,
   (
     2,
@@ -155,22 +157,22 @@ def separators():
 """, x)
 
 
-@test
-def recursion():
-    a = {1: None}
-    a[1] = a
-    x = format(a)
-    test.eq("""{
+    @test
+    def recursion():
+        a = {1: None}
+        a[1] = a
+        x = format(a)
+        test.eq("""{
   1:
     ...,
 }
 """, x)
 
 
-@test
-def set_sorted():
-    x = format({"noot", "mies", "aap"})
-    test.eq("""{
+    @test
+    def set_sorted():
+        x = format({"noot", "mies", "aap"})
+        test.eq("""{
   'aap',
   'mies',
   'noot',
@@ -178,16 +180,16 @@ def set_sorted():
 """, x)
 
 
-@test
-def set_sorted_uncomparables():
-    x = format({str, dict, bool})
-    test.eq("{\n  <class 'bool'>,\n  <class 'dict'>,\n  <class 'str'>,\n}\n", x)
+    @test
+    def set_sorted_uncomparables():
+        x = format({str, dict, bool})
+        test.eq("{\n  <class 'bool'>,\n  <class 'dict'>,\n  <class 'str'>,\n}\n", x)
 
 
-@test
-def dict_sorted():
-    x = format({"noot": 3, "mies": 2, "aap": 1})
-    test.eq("""{
+    @test
+    def dict_sorted():
+        x = format({"noot": 3, "mies": 2, "aap": 1})
+        test.eq("""{
   'aap':
     1,
   'mies':
@@ -198,16 +200,16 @@ def dict_sorted():
 """, x)
 
 
-@test
-def dict_sorted_uncomparables():
-    x = format({str: 2, dict: 1, bool: 3})
-    test.eq("{\n  <class 'bool'>:\n    3,\n  <class 'dict'>:\n    1,\n  <class 'str'>:\n    2,\n}\n", x)
+    @test
+    def dict_sorted_uncomparables():
+        x = format({str: 2, dict: 1, bool: 3})
+        test.eq("{\n  <class 'bool'>:\n    3,\n  <class 'dict'>:\n    1,\n  <class 'str'>:\n    2,\n}\n", x)
 
 
-@test
-def beetje_echt():
-    x = format({'pred_a': [{'pred_b': [{'@value': "32", '@type': 'number'}, {'@value': "more", '@type':  "text"}]}]})
-    test.eq("""{
+    @test
+    def beetje_echt():
+        x = format({'pred_a': [{'pred_b': [{'@value': "32", '@type': 'number'}, {'@value': "more", '@type':  "text"}]}]})
+        test.eq("""{
   'pred_a':
     [
       {
@@ -232,10 +234,10 @@ def beetje_echt():
 """ , x)
 
 
-@test
-def allez():
-    x = format({('aa', 'bb'): {('cc', ('dd',)): ('ee',)}, ('ff',): ()})
-    test.eq("""{
+    @test
+    def allez():
+        x = format({('aa', 'bb'): {('cc', ('dd',)): ('ee',)}, ('ff',): ()})
+        test.eq("""{
   (
     'aa',
     'bb',
@@ -259,39 +261,39 @@ def allez():
 """, x)
 
 
-@test
-def very_long_string_uninterrupted():
-    long_string = "aapnootmies" * 100
-    x = format((long_string,))
-    test.eq(f"""(
+    @test
+    def very_long_string_uninterrupted():
+        long_string = "aapnootmies" * 100
+        x = format((long_string,))
+        test.eq(f"""(
   '{long_string}',
 )
 """, x)
 
 
-@test
-def via_stdout(stdout):
-    d = {'a': ('b', 42)}
-    f = format(d)
-    prrint(d)
-    test.eq(f, stdout.getvalue())
+    @test
+    def via_stdout(stdout):
+        d = {'a': ('b', 42)}
+        f = format(d)
+        prrint(d)
+        test.eq(f, stdout.getvalue())
 
 
-def nndiff(a, b):
-    import difflib
-    import re
-    r = re.compile("(\s*)(\S+)(\s*)")
-    al = [r.fullmatch(l).group(1,2,3) for l in a]
-    bl = [r.fullmatch(l).group(1,2,3) for l in b]
-    dl = difflib.ndiff([l[1] for l in al], [l[1] for l in bl])
-    return dl
+    def nndiff(a, b):
+        import difflib
+        import re
+        r = re.compile("(\s*)(\S+)(\s*)")
+        al = [r.fullmatch(l).group(1,2,3) for l in a]
+        bl = [r.fullmatch(l).group(1,2,3) for l in b]
+        dl = difflib.ndiff([l[1] for l in al], [l[1] for l in bl])
+        return dl
 
 
-@test
-def diff2_whitespace():
-    a = [" a "]
-    b = ["  a "]
-    d = nndiff(a, b)
-    test.eq('  a', ''.join(d))
+    @test
+    def diff2_whitespace():
+        a = [" a "]
+        b = ["  a "]
+        d = nndiff(a, b)
+        test.eq('  a', ''.join(d))
 
 
