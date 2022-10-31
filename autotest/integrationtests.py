@@ -72,6 +72,23 @@ def integration_test(test):
                 pass
 
 
+    @test
+    def combine_test_with_options_and_test_arg():
+        trace = []
+        with test.child(keep=True, my_opt=42) as tst:
+            @tst
+            def f0(test):
+                trace.append(test.option_get('my_opt'))
+            def f1(test):
+                trace.append(test.option_get('my_opt'))
+            # at this point, f0 and f1 are equivalent; @tst does not modify f0
+            # so when run, a new test context must be provided:
+            test(f0)
+            test(f0, my_opt=76)
+            test(f0, f1, my_opt=93)
+            assert [42, None, 76, 93, 93] == trace, trace
+
+
     class async_fixtures:
         """ here because async fixtures need async tests """
 

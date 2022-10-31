@@ -44,7 +44,7 @@
 
 
 from .tester import Runner, self_test
-assert {'found': 28, 'run': 27} == self_test.stats, self_test.stats
+assert {'found': 22, 'run': 21} == self_test.stats, self_test.stats
 
 
 #from sys import argv

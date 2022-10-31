@@ -18,6 +18,10 @@ __all__ = ['Fixtures', 'testing_fixtures', 'std_fixtures']
 
 def get_fixture(runner, name):
     """ find fixture in hierarchical maps """
+    if name == 'test':
+        def test():
+            yield runner
+        return test
     for map in runner.option_enumerate('fixtures'):
         if name in map:
             return map[name]
@@ -619,3 +623,7 @@ def fixtures_test(self_test):
 
 
 
+    @self_test(my_option=56)
+    def access_test(test):
+        """ implicit fixture test """
+        assert test.option_get('my_option') == 56
