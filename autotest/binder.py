@@ -11,30 +11,6 @@ binder_hook = _Binder()
 
 def binder_test(self_test):
     self_test2 = self_test.getChild(hooks=(binder_hook,))
-    with self_test2.child() as tst:
-        @tst
-        def nested_defaults():
-            dflts0 = tst._options
-            assert not dflts0['skip']
-            with tst.child(skip=True) as tstk:
-                dflts1 = tstk._options
-                assert dflts1['skip']
-                @tstk
-                def fails_but_is_skipped():
-                    tstk.eq(1, 2)
-                try:
-                    with tstk.child(skip=False) as TeSt:
-                        dflts2 = TeSt._options
-                        assert not dflts2['skip']
-                        @TeSt
-                        def fails_but_is_not_reported():
-                            TeSt.gt(1, 2)
-                        tst.fail()
-                    assert tstk._options == dflts1
-                except AssertionError as e:
-                    tstk.eq("('gt', 1, 2)", str(e))
-            assert tst._options == dflts0
-
 
     class binding_context:
         a = 42

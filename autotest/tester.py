@@ -24,10 +24,8 @@ __all__ = ['getTester']
 
 
 defaults = dict(
-    skip      = not is_main_process or __name__ == '__mp_main__',
     keep      = False,           # Ditch test functions after running
-    timeout   = 2,               # asyncio task timeout
-    debug     = True,            # use debug for asyncio.run
+    run       = True,            # Run test immediately
 )
 
 
@@ -130,13 +128,12 @@ class Runner: # aka Tester
         """ Runs hooks and and runs result. """
         AUTOTEST_INTERNAL = 1
         self._stat('found')
-        skip = self.option_get('skip')
         orig_test_func = test_func
         for hook in self.option_enumerate('hooks'):
             if not (test_func := hook(self, test_func)):
-                break # skip
+                break
         else:
-            if inspect.isfunction(skip) and not skip(test_func) or not skip:
+            if self.option_get('run'):
                 self._stat('run')
                 self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
                 # TODO how to handle hook for diff?
@@ -415,4 +412,8 @@ class logging_handlers:
             msg = i[2].msg
             tst.contains(msg, "found: 2, run: 2")
 
-
+    @self_test
+    def run_or_not():
+        @self_test(run=False)
+        def not_run():
+            assert "do not" == "run me"

@@ -417,7 +417,7 @@ def fixtures_test(self_test):
 
     @self_test
     def test_calls_other_test_with_fixture_and_more_args():
-        @self_test(keep=True, skip=True)
+        @self_test(keep=True, run=False)
         def test_a(fixture_A, value):
             assert 42 == fixture_A
             assert 16 == value
@@ -529,7 +529,7 @@ def fixtures_test(self_test):
         def my_fix():
             yield 34
 
-        @self_test(skip=True, keep=True)
+        @self_test(run=False, keep=True)
         def override_fixture_binding_with_kwarg(my_fix):
             assert 34 != my_fix, "should be 34"
             assert 56 == my_fix
@@ -565,15 +565,6 @@ def fixtures_test(self_test):
         def my_fix(): # redefine fixture purposely to test time of binding
             yield 78
 
-        """ deprecated
-        @self_test(keep=True, skip=True) # skip, need more args
-        def bound_fixture_2(my_fix, result, *, extra=None):
-            assert 78 == my_fix
-            return result, extra
-
-        assert (56, "top") == bound_fixture_2(56, extra="top") # no need to pass args, already bound
-        """
-
         class A:
             a = 34
 
@@ -584,17 +575,6 @@ def fixtures_test(self_test):
                 #return a
             #assert 34 == bound_fixture_acces_class_locals(78)
 
-        """ deprecated
-        with self_test.child(keep=True):
-
-            @self_test
-            def bound_by_default(my_fix):
-                assert 78 == my_fix
-                return my_fix
-
-            assert 78 == bound_by_default()
-        """
-
         trace = []
 
         @self_test.fixture
@@ -603,7 +583,7 @@ def fixtures_test(self_test):
             yield 1
             trace.append('E')
 
-        @self_test(keep=True, skip=True)
+        @self_test(keep=True, run=False)
         def rebind_on_every_call(enumerate):
             return True
 

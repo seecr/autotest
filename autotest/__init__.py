@@ -28,6 +28,9 @@ from .tester import Runner, self_test
 from .prrint import prrint_test
 prrint_test(self_test)
 
+from .filter import filter_hook, filter_test
+filter_test(self_test)
+
 from .wildcard import wildcard_hook, wildcard_test
 wildcard_test(self_test)
 
@@ -52,13 +55,13 @@ diff_test(self_test)
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 101, 'run': 95}, self_test.stats)
+    self_test.eq({'found': 104, 'run': 97}, self_test.stats)
 
 
 def assemble_root_runner():
     return Runner(
         # order of hook matters, processed from right to left
-        hooks = (operators_hook, async_hook, fixtures_hook, diff_hook, levels_hook, wildcard_hook, binder_hook),
+        hooks = (operators_hook, async_hook, fixtures_hook, diff_hook, levels_hook, wildcard_hook, binder_hook, filter_hook),
         fixtures = std_fixtures,
     )
 
@@ -144,16 +147,21 @@ def root_tester_assembly_test(test):
     except AssertionError as e:
         assert str(e) == '\n- 1\n+ 2'
 
+    # filter hook
+    @test(filter='aa')
+    def moon():
+        test.fail()
+    r = [0]
+    @test(filter='aa')
+    def maan():
+        r[0] = 1
+    assert r == [1]
+
 
 
 root_tester_assembly_test(assemble_root_runner())
 
 root = assemble_root_runner()
-
-
-
-# HIER VERDER
-
 
 
 @self_test
@@ -195,9 +203,11 @@ def setup_correct():
              f'autotest-{version}/autotest/asyncer.py',
              f'autotest-{version}/autotest/binder.py',
              f'autotest-{version}/autotest/diffs.py',
+             f'autotest-{version}/autotest/filter.py',
              f'autotest-{version}/autotest/fixtures.py',
              f'autotest-{version}/autotest/levels.py',
              f'autotest-{version}/autotest/main.py',
+             f'autotest-{version}/autotest/mocks.py',
              f'autotest-{version}/autotest/moretests.py',
              f'autotest-{version}/autotest/operators.py',
              f'autotest-{version}/autotest/prrint.py',
@@ -216,16 +226,5 @@ def setup_correct():
             ],
             sorted(tf.getnames()), diff=lambda a, b: set(a).symmetric_difference(set(b)))
         tf.close()
-
-
-
-# helpers
-def mock_object(*functions, **more):
-    """ Creates an object from a bunch of functions.
-        Useful for testing methods from inside the class definition. """
-    self = mock.Mock()
-    self.configure_mock(**{f.__name__: types.MethodType(f, self) for f in functions}, **more)
-    return self
-
 
 
