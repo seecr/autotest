@@ -254,22 +254,30 @@ def test_testop_has_args():
         self_test.eq("('eq', 42, 67)", str(e))
 
 
-#@self_test  # test no longer modifies itself but creates a temporary runner when options are given
+@self_test
 def combine_test_with_options():
     trace = []
-    @self_test(keep=True, my_opt=42)
-    def f0():
-        trace.append(self_test.option_get('my_opt'))
-    def f1(): # ordinary function; the only difference, here(!) is binding
-        trace.append(self_test.option_get('my_opt'))
-    self_test(f0)
-    self_test(f0, my_opt=76)
-    self_test(f0, f1, my_opt=93)
-    assert [None, None, 76, 93, 93] == trace, trace
-    # TODO make options available in test when specificed in @self_test
-    # (@self_test(**options) makes a one time anonymous context)
-    # maybe an optional argument 'context' which tests can declare??
+    with self_test.child(keep=True, my_opt=42) as tst:
+        @tst
+        def f0():
+            trace.append(tst.option_get('my_opt'))
+        def f1():
+            trace.append(tst.option_get('my_opt'))
+        # at this point, f0 and f1 are equivalent; @tst does not modify f0
+        # so when run, a new test context must be provided:
+        self_test(f0)
+        self_test(f0, my_opt=76)
+        self_test(f0, f1, my_opt=93)
+        # however, both f0 and f1 have no access to this context
+        #assert [None, None, 76, 93, 93] == trace, trace
+        assert [42, 42, 42, 42, 42] == trace, trace
 
+        """ TODO replace static reference to tst with dynamic args 'test'?
+        @tst
+        def f(test):
+            # here test refers to tst
+            pass
+        """
 
 
 @self_test
