@@ -1,5 +1,12 @@
 
 
+""" this should be a hook, so you can get a mock by:
+
+    m = test.mock_object(...)
+
+    Doing so keeps test the only API access point.
+"""
+
 # helpers
 def mock_object(*functions, **more):
     """ Creates an object from a bunch of functions.

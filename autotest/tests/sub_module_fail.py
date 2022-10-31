@@ -23,6 +23,8 @@
 
 import autotest
 
-@autotest.test(report=True)
-def test_one():
-    autotest.test.eq(123, 42)
+test = autotest.get_tester(__name__)
+
+@test
+def tiedeldom():
+    assert 42 == 43, "fail I will"

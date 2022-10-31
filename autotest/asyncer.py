@@ -16,7 +16,18 @@ def async_hook(runner, func):
     def may_be_async(*a, **k):
         coro_or_result = func(*a, **k)
         if inspect.iscoroutine(coro_or_result):
-            thread(asyncio.run, coro_or_result, debug=runner.option_get('debug')).result()
+            async def with_options():
+                try:
+                    if scbd := runner.option_get('slow_callback_duration'):
+                        asyncio.get_running_loop().slow_callback_duration = scbd
+                    await asyncio.wait_for(asyncio.shield(coro_or_result), runner.option_get('timeout', 1))
+                except asyncio.TimeoutError as e:
+                    raise TimeoutError(func.__name__) from None
+            thread(
+                asyncio.run,
+                with_options(),
+                debug=runner.option_get('debug', True)
+                ).result()
         else:
             return coro_or_result
     return may_be_async
@@ -59,4 +70,39 @@ def async_test(self_test):
         except AssertionError as e:
             assert str(e) == '1 is not 2', e
 
-        atest.eq({'found': 5, 'run': 5}, atest.stats)
+
+        try:
+            @atest(timeout=0.05)
+            async def async_timeout_raises_standard_TimeoutError():
+                await asyncio.sleep(0.10)
+                assert False, "should have raised timeout"
+        except TimeoutError as e:
+            assert "async_timeout_raises_standard_TimeoutError" == str(e)
+
+
+        import sys, io, time
+        try:
+            sys.stderr = io.StringIO()
+            @atest
+            async def debug_warnings_on_by_default():
+                asyncio.get_running_loop().call_soon(time.sleep, 0.11)
+            s = sys.stderr.getvalue()
+            assert "Executing <Handle sleep(0.11) created at" in s, s
+            assert "took 0.110 seconds" in s, s
+        finally:
+            sys.stderr = sys.__stderr__
+
+
+        try:
+            sys.stderr = io.StringIO()
+            @atest(slow_callback_duration=0.12)
+            async def slow_callback_duration_option():
+                asyncio.get_running_loop().call_soon(time.sleep, 0.11)
+            s = sys.stderr.getvalue()
+            assert "Executing <Handle sleep(0.11) created at" not in s, s
+            assert "took 0.110 seconds" not in s, s
+        finally:
+            sys.stderr = sys.__stderr__
+
+
+        atest.eq({'found': 8, 'run': 8}, atest.stats)

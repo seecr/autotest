@@ -1,12 +1,10 @@
 
-import multiprocessing
 import contextlib
 import types            # for creating Function object with extended bindings
 import inspect
 import sys
 import functools        # wrapping function in async generator
 
-is_main_process = multiprocessing.current_process().name == "MainProcess"
 
 
 def iterate(f, v):

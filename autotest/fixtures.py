@@ -9,7 +9,7 @@ import sys
 import os
 
 from .utils import asyncio_filtering_exception_handler, ensure_async_generator_func
-from .utils import bind_1_frame_back
+from .utils import bind_1_frame_back, frame_to_traceback
 from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
@@ -337,6 +337,41 @@ def fixtures_test(self_test):
             assert str(tmp_path).endswith('/aap')
             tmp_path.write_text('hi monkey')
             assert tmp_path.exists()
+
+
+    @self_test
+    def stdout_capture():
+        name = "Erik"
+        msgs = []
+        sys_stdout = sys.stdout
+        sys_stderr = sys.stderr
+
+        @self_test(report=False)
+        def capture_all(stdout, stderr):
+            print(f"Hello {name}!", file=sys.stdout)
+            print(f"Bye {name}!", file=sys.stderr)
+            msgs.extend([stdout.getvalue(), stderr.getvalue()])
+            self_test.ne(sys_stdout, sys.stdout)
+            self_test.ne(sys_stderr, sys.stderr)
+        self_test.eq("Hello Erik!\n", msgs[0])
+        self_test.eq("Bye Erik!\n", msgs[1])
+        self_test.eq(sys_stdout, sys.stdout)
+        self_test.eq(sys_stderr, sys.stderr)
+
+
+    @self_test
+    def capture_stdout_child_processes(stdout):
+        import multiprocessing
+        def f():
+            @self_test
+            def in_child():
+                print("hier ben ik")
+                assert 1 == 1
+        p = multiprocessing.Process(target=f) # NB: forks
+        p.start()
+        p.join(1)
+        s = stdout.getvalue()
+        assert "hier ben ik\n" in s, s
 
 
     @self_test

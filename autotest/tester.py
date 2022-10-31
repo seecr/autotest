@@ -17,12 +17,6 @@ import collections      # chain maps for hierarchical Runners and Counter
 import logging          # output to logger
 
 
-from .utils import is_main_process
-
-
-__all__ = ['getTester']
-
-
 defaults = dict(
     keep      = False,           # Ditch test functions after running
     run       = True,            # Run test immediately
@@ -77,7 +71,7 @@ class Runner: # aka Tester
         """ Not to be instantiated directly, use autotest.getTester() instead """
         self._parent = parent
         if parent:
-            self._name = parent._name + '.' + name if name else parent._name
+            self._name = parent._name + '.' + name if name and parent._name else name or parent._name
             self._options = parent._options.new_child(m=options)
         else:
             self._name = name
@@ -151,6 +145,10 @@ class Runner: # aka Tester
                 return hook.lookup(self, name)
             except AttributeError:
                 pass
+
+    def __str__(self):
+        return f"<Runner {self._name!r}>"
+
 
 
 from numbers import Number

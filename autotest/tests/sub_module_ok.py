@@ -23,7 +23,12 @@
 
 import autotest
 
-@autotest.test(report=True)
+test = autotest.get_tester(__name__)
+
+@test
 def test_one():
-    print("I am a happy submodule")
+    print("TESTER:", test)
     assert 1 == 1
+
+
+marker = 1

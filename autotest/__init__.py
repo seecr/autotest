@@ -22,8 +22,42 @@
 ## end license ##
 
 
+"""
+    The structure of autotests for bootstrapping.
+    ---------------------------------------------
+    * tester.py contains the main Runner without any hooks, this module tests itself using a
+      separate Runner called self_test. We reuse self_test to incrementally run the tests for
+      the hooks.
+    * self_test contains one hook: operator, in order to make testing easier. However, a
+      small mistake in operator might cause all tests to fail since Runner and operator
+      mutually depend on each other.
+    * After all hooks have been tested, we assemble the final root Runner and tests if
+      all hooks work properly.
+    * Run tests for autotest itself by:
+       $ python -c "import autotest" <level>
+      <level> should be 'integration' iff you want all tests to be run
+    * Integration tests are run with a partially initialized __init__.py, but it works
+    * Finally we test the setup
+
+"""
+
+
 
 from .tester import Runner, self_test
+assert {'found': 22, 'run': 21} == self_test.stats, self_test.stats
+
+
+#from sys import argv
+#if level := argv[-1]:
+#    import importlib
+#    lvls = importlib.import_module('.levels', __name__)
+#    level = getattr(lvls, level.upper(), 0)
+#    assert 0 <= level <= 50
+#    self_test = self_test.getChild(level=0)
+print("** LEVEL:", self_test.option_get('level'))
+
+from .levels import levels_hook, levels_test
+levels_test(self_test)
 
 from .prrint import prrint_test
 prrint_test(self_test)
@@ -36,9 +70,6 @@ wildcard_test(self_test)
 
 from .binder import binder_hook, binder_test
 binder_test(self_test)
-
-from .levels import levels_hook, levels_test
-levels_test(self_test)
 
 from .operators import operators_hook, operators_test
 operators_test(self_test)
@@ -53,15 +84,25 @@ from .diffs import diff_hook, diff_test
 diff_test(self_test)
 
 
-@self_test
+
+#@self_test
 def check_stats():
-    self_test.eq({'found': 104, 'run': 97}, self_test.stats)
+    self_test.eq({'found': 85, 'run': 79}, self_test.stats)
 
 
 def assemble_root_runner():
     return Runner(
         # order of hook matters, processed from right to left
-        hooks = (operators_hook, async_hook, fixtures_hook, diff_hook, levels_hook, wildcard_hook, binder_hook, filter_hook),
+        hooks = [
+            operators_hook,
+            async_hook,
+            fixtures_hook,
+            diff_hook,
+            levels_hook,
+            wildcard_hook,
+            binder_hook,
+            filter_hook
+            ],
         fixtures = std_fixtures,
     )
 
@@ -110,13 +151,16 @@ def root_tester_assembly_test(test):
     test.eq(test.any(int), 42)
 
     # levels hook
-    @test.performance
-    def performance_test():
-        assert "not" == "executed"
-    @test.critical
-    def critical_test():
-        assert 1 == 1
-        N[0] += 1
+    from .levels import UNIT
+    with test.child(level=UNIT) as tst:
+        @tst.performance
+        def performance_test():
+            assert "not" == "executed"
+        @tst.critical
+        def critical_test():
+            assert 1 == 1
+            N[0] += 1
+        assert {'found': 2, 'run': 1} == tst.stats, tst.stats
 
     # async hook (elaborate on nested stuff)
     @test.fixture
@@ -158,10 +202,44 @@ def root_tester_assembly_test(test):
     assert r == [1]
 
 
+root = assemble_root_runner()
+testers = {None: root}
+
+def get_tester(name=None):
+    if name in testers:
+        return testers[name]
+    tester = root
+    for namepart in name.split('.'):
+        tester = tester.getChild(namepart)
+        testers[tester._name] = tester
+    return tester
+
+
+@self_test
+def get_root_tester():
+    root = get_tester()
+    assert isinstance(root, Runner)
+    root1 = get_tester()
+    assert root1 is root
+
+
+@self_test
+def get_sub_tester():
+    mymodule = get_tester('my.module')
+    assert mymodule._name == 'my.module'
+    my = get_tester('my')
+    assert my._name == 'my'
+    assert my._parent is root
+    assert mymodule._parent is my
+    mymodule1 = get_tester('my.module')
+    assert mymodule1 is mymodule
+
+
 
 root_tester_assembly_test(assemble_root_runner())
+from .integrationtests import integration_test
+integration_test(assemble_root_runner().integration)
 
-root = assemble_root_runner()
 
 
 @self_test

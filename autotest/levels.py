@@ -1,21 +1,20 @@
 import logging
 
-CRITICAL    = logging.CRITICAL
-UNIT        = logging.ERROR
-INTEGRATION = logging.WARNING
-PERFORMANCE = logging.INFO
-NOTSET      = logging.NOTSET
+CRITICAL    = logging.CRITICAL  # 50
+UNIT        = logging.ERROR     # 40
+INTEGRATION = logging.WARNING   # 30
+PERFORMANCE = logging.INFO      # 20
+NOTSET      = logging.NOTSET    #  0
 
 
 class _Levels:
 
     def __call__(self, tester, func):
-        level = tester.option_get('level', UNIT)
-        plevel = tester._parent.option_get('level', UNIT) if tester._parent else UNIT
-        skip = level < plevel
-        if skip:
-            return
-        return func
+        levels = list(tester.option_enumerate('level')) or [0]
+        threshold = levels[-1]
+        level = levels[0]
+        if level >= threshold:
+            return func
 
     def lookup(self, tester, name):
         if name == 'critical':
