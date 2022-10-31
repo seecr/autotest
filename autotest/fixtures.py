@@ -263,82 +263,6 @@ def fixtures_test(self_test):
             assert ['A-live', 'B-live', 'C-live', 'C-close', 'B-close', 'A-close'] == fixture_lifetime, fixture_lifetime
 
 
-    class async_fixtures:
-
-        @self_test.fixture
-        async def my_async_fixture():
-            await asyncio.sleep(0)
-            yield 'async-42'
-
-
-        @self_test
-        async def async_fixture_with_async_with():
-            async with self_test.my_async_fixture as f:
-                assert 'async-42' == f
-            try:
-                with self_test.my_async_fixture:
-                    assert False
-            except Exception as e:
-                self_test.startswith(str(e), "Use 'async with' for ")
-
-
-        @self_test
-        async def async_fixture_as_arg(my_async_fixture):
-            self_test.eq('async-42', my_async_fixture)
-
-
-        try:
-            @self_test
-            def only_async_funcs_can_have_async_fixtures(my_async_fixture):
-                assert False, "not possible"
-        except AssertionError as e:
-            self_test.eq(f"function 'only_async_funcs_can_have_async_fixtures' cannot have async fixture 'my_async_fixture'.", str(e))
-
-
-        @self_test.fixture
-        async def with_nested_async_fixture(my_async_fixture):
-            yield f">>>{my_async_fixture}<<<"
-
-
-        @self_test
-        async def async_test_with_nested_async_fixtures(with_nested_async_fixture):
-            self_test.eq(">>>async-42<<<", with_nested_async_fixture)
-
-
-        @self_test
-        async def mix_async_and_sync_fixtures(fixture_C, with_nested_async_fixture):
-            self_test.eq(">>>async-42<<<", with_nested_async_fixture)
-            self_test.eq(252, fixture_C)
-
-
-    class tmp_files:
-
-        path = [None]
-
-        @self_test
-        def temp_sync(tmp_path):
-            assert tmp_path.exists()
-
-        @self_test
-        def temp_file_removal(tmp_path):
-            path[0] = tmp_path / 'aap'
-            path[0].write_text("hello")
-
-        @self_test
-        def temp_file_gone():
-            assert not path[0].exists()
-
-        @self_test
-        async def temp_async(tmp_path):
-            assert tmp_path.exists()
-
-        @self_test
-        def temp_dir_with_file(tmp_path:'aap'):
-            assert str(tmp_path).endswith('/aap')
-            tmp_path.write_text('hi monkey')
-            assert tmp_path.exists()
-
-
     @self_test
     def stdout_capture():
         name = "Erik"
@@ -426,9 +350,6 @@ def fixtures_test(self_test):
     @self_test
     def fixtures_with_2_args(area:(3,0)):
         self_test.eq(28.0, area)
-    @self_test
-    async def fixtures_with_2_args_async(area:(3,2)):
-        self_test.eq(28.27, area)
 
     @self_test.fixture
     def answer(): yield 42

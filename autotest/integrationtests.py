@@ -72,34 +72,90 @@ def integration_test(test):
                 pass
 
 
-    # We put this test last, as it captures output an thus fails when using print
-    @test
-    def reporting_tests(stdout):
+    class async_fixtures:
+        """ here because async fixtures need async tests """
+
+        @test.fixture
+        async def my_async_fixture():
+            await asyncio.sleep(0)
+            yield 'async-42'
+
+
+        @test
+        async def async_fixture_with_async_with():
+            async with test.my_async_fixture as f:
+                assert 'async-42' == f
+            try:
+                with test.my_async_fixture:
+                    assert False
+                test.fail()
+            except Exception as e:
+                test.startswith(str(e), "Use 'async with' for ")
+
+
+        @test
+        async def async_fixture_as_arg(my_async_fixture):
+            test.eq('async-42', my_async_fixture)
+
+
         try:
-            @test(report=False)
-            def test_no_reporting_but_failure_raised():
-                assert 1 != 1
-            self.fail("should fail")
+            @test
+            def only_async_funcs_can_have_async_fixtures(my_async_fixture):
+                assert False, "not possible"
         except AssertionError as e:
-            t, v, tb = sys.exc_info()
-            tbi = traceback.extract_tb(tb)
-            assert "test_no_reporting_but_failure_raised" == tbi[-1].name, tbi[-1].name
-            assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
-        m = stdout.getvalue()
-        assert "" == m, m
+            test.eq(f"function 'only_async_funcs_can_have_async_fixtures' cannot have async fixture 'my_async_fixture'.", str(e))
 
 
-        try:
-            @test(report=True)
-            def test_with_reporting_and_failure_raised():
-                assert 1 != 1
-            self.fail("should fail")
-        except AssertionError:
-            t, v, tb = sys.exc_info()
-            tbi = traceback.extract_tb(tb)
-            assert "test_with_reporting_and_failure_raised" == tbi[-1].name, tbi[-1].name
-            assert "assert 1 != 1" == tbi[-1].line, repr(tbi[-1].line)
-        m = stdout.getvalue()
-        test.contains(m, "autotest.tester  \033[1mtest_with_reporting_and_failure_raised\033[0m")
+        @test.fixture
+        async def with_nested_async_fixture(my_async_fixture):
+            yield f">>>{my_async_fixture}<<<"
 
+
+        @test
+        async def async_test_with_nested_async_fixtures(with_nested_async_fixture):
+            test.eq(">>>async-42<<<", with_nested_async_fixture)
+
+
+        @test
+        async def mix_async_and_sync_fixtures(fixture_C, with_nested_async_fixture):
+            test.eq(">>>async-42<<<", with_nested_async_fixture)
+            test.eq(252, fixture_C)
+
+
+        @test.fixture
+        def area(r, d=1):
+            import math
+            yield round(math.pi * r * r, d)
+
+        @test
+        async def fixtures_with_2_args_async(area:(3,2)):
+            test.eq(28.27, area)
+
+
+    class tmp_files:
+
+        path = [None]
+
+        @test
+        def temp_sync(tmp_path):
+            assert tmp_path.exists()
+
+        @test
+        def temp_file_removal(tmp_path):
+            path[0] = tmp_path / 'aap'
+            path[0].write_text("hello")
+
+        @test
+        def temp_file_gone():
+            assert not path[0].exists()
+
+        @test
+        async def temp_async(tmp_path):
+            assert tmp_path.exists()
+
+        @test
+        def temp_dir_with_file(tmp_path:'aap'):
+            assert str(tmp_path).endswith('/aap')
+            tmp_path.write_text('hi monkey')
+            assert tmp_path.exists()
 
