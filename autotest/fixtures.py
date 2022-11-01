@@ -341,6 +341,7 @@ def fixtures_test(self_test):
             pass
 
 
+
     @self_test.fixture
     def area(r, d=1):
         import math
@@ -393,10 +394,6 @@ def fixtures_test(self_test):
 
         @self_test
         def fixtures_can_also_see_attrs_from_classed_being_defined(f_A):
-            assert v == f_A, f_A
-
-        @self_test
-        async def coroutines_can_also_see_attrs_from_classed_being_defined(f_A):
             assert v == f_A, f_A
 
 
@@ -492,12 +489,6 @@ def fixtures_test(self_test):
         assert ['S', 'E'] == trace
         self_test(rebind_on_every_call)
         assert ['S', 'E', 'S', 'E'] == trace
-
-
-    @self_test
-    async def async_function():
-        await asyncio.sleep(0)
-        assert True
 
 
     # below is an extra test to assure fixtures work with nested async funcs

@@ -46,7 +46,7 @@ class Runner: # aka Tester
     def child(self, *_, **__):
         child = self.getChild(*_, **__)
         yield child
-        child._log_stats()
+        child.log_stats()
 
 
     def addHandler(self, handler):
@@ -76,7 +76,7 @@ class Runner: # aka Tester
         else:
             self._name = name
             self._options = collections.ChainMap(options, defaults)
-        self.stats = collections.Counter()
+        self.stats = collections.Counter(found=0, run=0)
         self._loghandlers = []
 
 
@@ -106,7 +106,7 @@ class Runner: # aka Tester
 
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
-            self._name,                               # name of logger
+            self._name or 'root',                     # name of logger
             self.option_get('level', 40),             # log level   #TODO
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
@@ -134,8 +134,8 @@ class Runner: # aka Tester
         return orig_test_func if self.option_get('keep') else None
 
 
-    def _log_stats(self):
-        self.handle(self._create_logrecord(None, ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
+    def log_stats(self):
+        self.handle(self._create_logrecord(self.log_stats, 'stats:' + ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
 
 
     def __getattr__(self, name):
@@ -161,8 +161,21 @@ class any_number:
 
 from .operators import operators_hook
 
-self_test = Runner('autotest-self-tests',
+from sys import argv
+if 'autotest.selftest' in argv:
+    argv.remove('autotest.selftest')
+    self_test = Runner('autotest-self-tests',
         hooks=(operators_hook,)) # separate runner for bootstrapping/self testing
+else:
+    class Ignore:
+        def __call__(self, runner, func):
+            pass
+        def lookup(self, runner, name):
+            def noop(*_, **__):
+                pass
+            return noop
+    self_test = Runner(hooks=[Ignore()])
+    self_test.addHandler(logging.NullHandler())
 
 
 @self_test

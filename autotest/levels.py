@@ -31,6 +31,11 @@ levels = {
     'INTEGRATION':  INTEGRATION,
     'PERFORMANCE':  PERFORMANCE,
     'NOTSET':       NOTSET,
+    CRITICAL:       'CRITICAL',
+    UNIT:           'UNIT',
+    INTEGRATION:    'INTEGRATION',
+    PERFORMANCE:    'PERFORMANCE',
+    NOTSET:         'NOTSET',
 }
 
 

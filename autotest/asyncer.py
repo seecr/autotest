@@ -14,9 +14,11 @@ thread = concurrent.futures.ThreadPoolExecutor(max_workers=10).submit
 
 def async_hook(runner, func):
     def may_be_async(*a, **k):
+        AUTOTEST_INTERNAL = 1
         coro_or_result = func(*a, **k)
         if inspect.iscoroutine(coro_or_result):
             async def with_options():
+                AUTOTEST_INTERNAL = 1
                 try:
                     if scbd := runner.option_get('slow_callback_duration'):
                         asyncio.get_running_loop().slow_callback_duration = scbd
@@ -36,7 +38,7 @@ def async_hook(runner, func):
 def async_test(self_test):
     with self_test.child(hooks=(async_hook,)) as atest:
 
-        atest.eq({}, atest.stats)
+        atest.eq({'found': 0, 'run': 0}, atest.stats)
         trace = [None, None, None, None]
 
         @atest
@@ -53,14 +55,14 @@ def async_test(self_test):
             def nested_sync_test():
                 trace[3] = asyncio.get_running_loop()
 
-        assert len(trace) ==  4
-        assert trace[0]
-        assert trace[1]
-        assert trace[1] != trace[0]
-        assert trace[2]
-        assert trace[2] != trace[0] # each async test has own loop
-        assert trace[2] != trace[1]
-        assert trace[3] == trace[1] # still same loop
+            assert len(trace) ==  4
+            assert trace[0]
+            assert trace[1]
+            assert trace[1] != trace[0]
+            assert trace[2]
+            assert trace[2] != trace[0] # each async test has own loop
+            assert trace[2] != trace[1]
+            assert trace[3] == trace[1] # still same loop
 
         try:
             @atest
@@ -87,8 +89,10 @@ def async_test(self_test):
             async def debug_warnings_on_by_default():
                 asyncio.get_running_loop().call_soon(time.sleep, 0.11)
             s = sys.stderr.getvalue()
-            assert "Executing <Handle sleep(0.11) created at" in s, s
-            assert "took 0.110 seconds" in s, s
+            @atest
+            def asserts():
+                assert "Executing <Handle sleep(0.11) created at" in s, s
+                assert "took 0.110 seconds" in s, s
         finally:
             sys.stderr = sys.__stderr__
 
@@ -105,4 +109,6 @@ def async_test(self_test):
             sys.stderr = sys.__stderr__
 
 
-        atest.eq({'found': 8, 'run': 8}, atest.stats)
+        @atest
+        def assert_stats():
+            atest.eq({'found': 10, 'run': 10}, atest.stats)

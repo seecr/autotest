@@ -65,9 +65,23 @@ def bind_1_frame_back(func):
     return func2
 
 
+std_modules = sys.builtin_module_names + (
+        'runpy',
+        'concurrent.futures._base',
+        'concurrent.futures.thread',
+        'asyncio.runners',
+        'asyncio.base_events',
+        'asyncio.tasks',
+        'autotest',
+        'autotest.binder',
+        'autotest.fixtures',
+)
+
+
 def is_builtin(f):
     if m := inspect.getmodule(f.f_code):
-        return m.__name__ in sys.builtin_module_names
+        return m.__name__ in std_modules
+
 
 def is_internal(frame):
     nm = frame.f_code.co_filename

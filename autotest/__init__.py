@@ -34,8 +34,7 @@
     * After all hooks have been tested, we assemble the final root Runner and tests if
       all hooks work properly.
     * Run tests for autotest itself by:
-       $ python -c "import autotest" <level>
-      <level> should be 'integration' iff you want all tests to be run
+       $ python -c "import autotest" autotest.selftest
     * Integration tests are run with a partially initialized __init__.py, but it works
     * Finally we test the setup
 
@@ -44,17 +43,10 @@
 
 
 from .tester import Runner, self_test
-assert {'found': 22, 'run': 21} == self_test.stats, self_test.stats
+@self_test
+def assert_stats():
+    assert {'found': 23, 'run': 22} == self_test.stats, self_test.stats
 
-
-#from sys import argv
-#if level := argv[-1]:
-#    import importlib
-#    lvls = importlib.import_module('.levels', __name__)
-#    level = getattr(lvls, level.upper(), 0)
-#    assert 0 <= level <= 50
-#    self_test = self_test.getChild(level=0)
-print("** LEVEL:", self_test.option_get('level'))
 
 from .levels import levels_hook, levels_test
 levels_test(self_test)
@@ -85,9 +77,9 @@ diff_test(self_test)
 
 
 
-#@self_test
+@self_test
 def check_stats():
-    self_test.eq({'found': 85, 'run': 79}, self_test.stats)
+    self_test.eq({'found': 109, 'run': 97}, self_test.stats)
 
 
 def assemble_root_runner():
@@ -236,9 +228,11 @@ def get_sub_tester():
 
 
 
-root_tester_assembly_test(assemble_root_runner())
-from .integrationtests import integration_test
-integration_test(assemble_root_runner().integration)
+@self_test
+def run_integration_tests():
+    root_tester_assembly_test(assemble_root_runner())
+    from .integrationtests import integration_test
+    integration_test(assemble_root_runner().integration)
 
 
 
