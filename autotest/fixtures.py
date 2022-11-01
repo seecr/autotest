@@ -32,7 +32,6 @@ def add_fixture(runner, func):
     runner.option_setdefault('fixtures', {})[func.__name__] = func
 
 
-# redefine the placeholder with support for fixtures
 class _Fixtures:
     """ Activates all fixtures recursively, then runs the test function. """
 
@@ -51,7 +50,7 @@ class _Fixtures:
                 add_fixture(tester, bound_f)
                 return bound_f
             return fixture
-        elif fx := get_fixture(tester, name): # tester._fixtures.get(name):
+        elif fx := get_fixture(tester, name):
             fx_bound = _Fixtures(tester, fx)
             if inspect.isgeneratorfunction(fx):
                 return ArgsCollectingContextManager(fx_bound)
@@ -274,7 +273,7 @@ def fixtures_test(self_test):
         sys_stdout = sys.stdout
         sys_stderr = sys.stderr
 
-        @self_test(report=False)
+        @self_test
         def capture_all(stdout, stderr):
             print(f"Hello {name}!", file=sys.stdout)
             print(f"Bye {name}!", file=sys.stderr)
@@ -323,17 +322,16 @@ def fixtures_test(self_test):
     @self_test
     def override_fixtures_in_new_context():
         with self_test.child() as t:
-            assert self_test != t
             @t.fixture
             def temporary_fixture():
                 yield "tmp one"
             with t.temporary_fixture as tf1:
                 assert "tmp one" == tf1, tf1
-            with self_test.child():
-                @self_test.fixture
+            with self_test.child() as child:
+                @child.fixture
                 def temporary_fixture():
                     yield "tmp two"
-                with self_test.temporary_fixture as tf2:
+                with child.temporary_fixture as tf2:
                     assert "tmp two" == tf2
             with t.temporary_fixture as tf1:
                 assert "tmp one" == tf1, tf1
@@ -356,7 +354,8 @@ def fixtures_test(self_test):
         self_test.eq(28.0, area)
 
     @self_test.fixture
-    def answer(): yield 42
+    def answer():
+        yield 42
     @self_test.fixture
     def combine(a, area:2, answer): yield a * area * answer
     @self_test
@@ -386,65 +385,6 @@ def fixtures_test(self_test):
         def test_b(fixture_A):
             assert test_a(fixture_A=42, value=16)
 
-
-    M = 'module scope'
-    a = 'scope:global'
-    b = 10
-
-    assert 'scope:global' == a
-    assert 10 == b
-
-    class X:
-        a = 'scope:X'
-        x = 11
-
-        #@self_test(keep=True)
-        def C(fixture_A):
-            a = 'scope:C'
-            c = 12
-            assert 'scope:C' == a
-            assert 10 == b
-            assert 11 == x
-            assert 12 == c
-            assert 10 == abs(-10) # built-in
-            assert 'module scope' == M
-            assert 42 == fixture_A, fixture_A
-            return fixture_A
-
-        #@self_test(keep=True)
-        def D(fixture_A, fixture_B):
-            a = 'scope:D'
-            assert 'scope:D' == a
-            assert 10 == b
-            assert 11 == x
-            assert callable(C), C
-            assert 10 == abs(-10) # built-in
-            assert 'module scope' == M
-            assert 42 == fixture_A, fixture_A
-            assert 84 == fixture_B, fixture_B
-            return fixture_B
-
-        class Y:
-            a = 'scope:Y'
-            assert 'scope:Y' == a
-            b = None
-            y = 13
-
-            #@self_test
-            def h(fixture_C):
-                global a, b # avoid binding to a and b in enclosing def
-                assert 'scope:Y' == a, a
-                assert None == b
-                assert 11 == x
-                assert 13 == y
-                assert callable(C)
-                assert callable(D)
-                assert C != D
-                assert 10 == abs(-10) # built-in
-                assert 42 == C(fixture_A=42)
-                assert 84 == D(fixture_A=42, fixture_B=84) # "fixtures"
-                assert 'module scope' == M
-                assert 252 == fixture_C, fixture_C
 
         v = 45
         @self_test.fixture
@@ -476,8 +416,6 @@ def fixtures_test(self_test):
         # it is possible to supply additional args when used as context
         with self_test.fixture_D as d: # only fixture as arg
             assert 10 == d
-        #with self_test.fixture_D() as d: # idem
-        #    assert 10 == d
         with self_test.fixture_D(16) as d: # fixture arg + addtional arg
             assert 16 == d
 
@@ -528,11 +466,13 @@ def fixtures_test(self_test):
         class A:
             a = 34
 
-            @self_test(keep=True) # skip, need more args
+            @self_test(keep=True, run=False)
             def bound_fixture_acces_class_locals(my_fix):
                 assert 78 == my_fix
-                #assert 34 == a
-                #return a
+                assert 34 == a
+                return a
+            # TODO function should have an extended closure, but when kept
+            #      the original function is kept.
             #assert 34 == bound_fixture_acces_class_locals(78)
 
         trace = []
