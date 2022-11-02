@@ -41,6 +41,8 @@
 """
 
 
+import os
+
 
 from .tester import Runner, self_test
 @self_test
@@ -82,7 +84,7 @@ def check_stats():
     self_test.eq({'found': 109, 'run': 97}, self_test.stats)
 
 
-def assemble_root_runner():
+def assemble_root_runner(**options):
     return Runner(
         # order of hook matters, processed from right to left
         hooks = [
@@ -96,6 +98,7 @@ def assemble_root_runner():
             filter_hook
             ],
         fixtures = std_fixtures,
+        **options,
     )
 
 
@@ -194,17 +197,35 @@ def root_tester_assembly_test(test):
     assert r == [1]
 
 
-root = assemble_root_runner()
-testers = {None: root}
+testers = {} # initial, for more testing
+
+
+def basic_config(**options):
+    assert None not in testers
+    testers[None] = assemble_root_runner(**options)
+
 
 def get_tester(name=None):
+    if None not in testers:
+        testers[None] = assemble_root_runner()
     if name in testers:
         return testers[name]
-    tester = root
+    tester = testers[None]
     for namepart in name.split('.'):
         tester = tester.getChild(namepart)
         testers[tester._name] = tester
     return tester
+
+
+@self_test
+def set_root_opts():
+    basic_config(filter='aap')
+    root = get_tester()
+    self_test.eq({'filter', 'fixtures', 'hooks', 'keep', 'run'}, set(root._options.keys()))
+    self_test.eq('aap', root._options['filter'])
+
+
+testers = {} # final
 
 
 @self_test
@@ -217,6 +238,7 @@ def get_root_tester():
 
 @self_test
 def get_sub_tester():
+    root = get_tester()
     mymodule = get_tester('my.module')
     assert mymodule._name == 'my.module'
     my = get_tester('my')
@@ -225,7 +247,6 @@ def get_sub_tester():
     assert mymodule._parent is my
     mymodule1 = get_tester('my.module')
     assert mymodule1 is mymodule
-
 
 
 @self_test
@@ -289,6 +310,8 @@ def setup_correct():
              f'autotest-{version}/autotest/tests/sub_module_fail.py',
              f'autotest-{version}/autotest/tests/sub_module_ok.py',
              f'autotest-{version}/autotest/tests/temporary_class_namespace.py',
+             f'autotest-{version}/autotest/tests/tryout.py',
+             f'autotest-{version}/autotest/tests/tryout2.py',
              f'autotest-{version}/autotest/utils.py',
              f'autotest-{version}/autotest/wildcard.py',
              f'autotest-{version}/bin',
@@ -299,4 +322,92 @@ def setup_correct():
             sorted(tf.getnames()), diff=lambda a, b: set(a).symmetric_difference(set(b)))
         tf.close()
 
+"""
+We put these last, as printing any debug/trace messages anywhere in th code causes this
+to fail.
+"""
+
+if 'AUTOTESTSELFTEST' not in os.environ:
+    os.putenv('AUTOTESTSELFTEST', 'ACTIVE')
+
+    self_test2 = self_test.getChild(hooks=[fixtures_hook], fixtures=std_fixtures)
+
+
+    @self_test2
+    def main_without_args(stdout):
+        os.system("PYTHONPATH=. python autotest")
+        assert "Usage: autotest [options] module" in stdout.getvalue()
+
+
+    @self_test2
+    def main_test(stderr, stdout):
+        import os
+        os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
+        loglines = stdout.getvalue().splitlines()
+        assert 'importing autotest.tests.tryout' in loglines[0]
+        assert "TEST:UNIT:autotest.tests.tryout:one_simple_test:" in loglines[1], loglines
+        assert "autotest/autotest/tests/tryout.py:6" in loglines[1]
+        assert "TEST:INTEGRATION:autotest.tests.tryout:one_more_test:" in loglines[2]
+        assert "autotest/autotest/tests/tryout.py:10" in loglines[2]
+        assert len(loglines) == 3
+        lines = stderr.getvalue().splitlines()
+        assert "  7  \tdef one_simple_test():" == lines[0]
+        assert "  8  \t    test.eq(1, 1)" == lines[1]
+        assert "  9  \t" == lines[2]
+        assert " 10  \t@test.integration" == lines[3]
+        assert " 11  \tasync def one_more_test():" == lines[4]
+        assert ' 12  ->\t    assert 1 == 2, "one is not two"' == lines[5]
+        assert " 13  \t    test.eq(1, 2)" == lines[6]
+        assert "[EOF]" == lines[7]
+        assert "Traceback (most recent call last):" in lines[8]
+        # some stuff in between we can't get rid off
+        assert "in <module>" in lines[-5]
+        assert "autotest/tests/tryout.py" in lines[-5]
+        assert "async def one_more_test():" in lines[-4]
+        assert "in one_more_test" in lines[-3]
+        assert "autotest/tests/tryout.py" in lines[-3]
+        assert "assert 1 == 2" in lines[-2]
+        assert "AssertionError: one is not two" in lines[-1], lines[-1]
+        assert 20 == len(lines), len(lines)
+
+
+    @self_test2
+    def main_with_selftests(stdout, stderr):
+        os.system("PYTHONPATH=. python autotest autotest.selftest")
+        lns = stdout.getvalue().splitlines()
+        assert ['Usage: autotest [options] module', ''] == lns, lns
+        lns = stderr.getvalue().splitlines()
+        assert len(lns) == 141, len(lns) # number of logged tests, sort of
+
+
+    @self_test2
+    def main_via_bin_script_with_autotest_on_path(stdout, stderr):
+        os.system(f'PATH=./bin:$PATH autotest autotest/tests/tryout2.py')
+        o = stdout.getvalue()
+        e = stderr.getvalue()
+        self_test2.startswith(o, "importing autotest.tests.tryout2")
+        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test_succeeds")
+        self_test2.contains(o, "TEST:UNIT:root:stats:found: 1, run: 1:")
+        self_test2.eq('', e)
+
+
+    @self_test2
+    def main_via_bin_script_in_cur_dir(stdout, stderr):
+        os.system(f'(cd bin; ./autotest autotest/tests/tryout2.py)')
+        o = stdout.getvalue()
+        e = stderr.getvalue()
+        self_test2.startswith(o, "importing autotest.tests.tryout2")
+        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test_succeeds")
+        self_test2.contains(o, "TEST:UNIT:root:stats:found: 1, run: 1:")
+        self_test2.eq('', e)
+
+    @self_test2
+    def main_with_filter(stdout, stderr):
+        os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py --filter one_simple_test")
+        o = stdout.getvalue()
+        e = stderr.getvalue()
+        assert 'one_simple_test' in o
+        assert 'one_more_test' not in o
+        assert 'found: 2, run: 1' in o
+        assert '' == e, e
 

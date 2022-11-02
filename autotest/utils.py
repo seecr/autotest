@@ -72,9 +72,10 @@ std_modules = sys.builtin_module_names + (
         'asyncio.runners',
         'asyncio.base_events',
         'asyncio.tasks',
-        'autotest',
-        'autotest.binder',
+        #'autotest',
+        #'autotest.binder',
         'autotest.fixtures',
+        'importlib',
 )
 
 
@@ -153,8 +154,10 @@ def extra_args_supplying_contextmanager():
 
 
 def filter_traceback(root):
+    # first prune the end of the list
     while root and is_internal(root.tb_frame):
         root = root.tb_next
+    # then cut unwanted frames in between others
     tb = root
     while tb and tb.tb_next:
         if is_internal(tb.tb_next.tb_frame):

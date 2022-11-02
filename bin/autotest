@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 ## begin license ##
 #
 # "Autotest": a simpler test runner for python
@@ -22,27 +23,13 @@
 #
 ## end license ##
 
+import sys
 import pathlib
-mypath = pathlib.Path(__file__).parent.resolve()
 
-if __name__ == '__main__':
-    if (mypath.parent/'autotest/__init__.py').exists():
-        import sys
-        sys.path.insert(0, str(mypath.parent))
-        from autotest import main
-    else:
-        from autotest import main
-    # trace cannot be in Runner or Report because that would not trace the imports.
-    # Preliminary tray out.
-    # TODO
-    # 1. test
-    # 2. turn on/off
-    # 3. report coverage only for given test modules
-    # 4. figure out where to put this
-    # NB: sys.base_prefix is hard path while sys.prefix can be virtualized
-    #import trace
-    #t = trace.Trace(count=1, trace=0, ignoredirs=[sys.base_prefix, sys.base_exec_prefix, sys.prefix, sys.exec_prefix])
-    #t.runfunc(main)
-    main()
-    #t.results().write_results(summary=True)
-    exit(0)
+mypath = pathlib.Path(__file__).parent.resolve()
+if (mypath.parent/'autotest/__init__.py').exists():
+    sys.path.insert(0, mypath.parent.as_posix())
+
+import runpy
+runpy.run_module('autotest')
+

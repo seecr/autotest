@@ -13,7 +13,8 @@ class _Operators:
                 def __getattr__(inner, name):
                     return self.lookup(runner, name, truth=operator.not_)
             return Not()
-        def call_operator(*args, diff=None):
+        def call_operator(*oargs, diff=None):
+            args = oargs                # TODO test
             AUTOTEST_INTERNAL = 1
             if hasattr(operator, name):
                 op = getattr(operator, name)
@@ -21,13 +22,13 @@ class _Operators:
                 op = getattr(builtins, name)
             else:
                 op = getattr(args[0], name)
-                args = args[1:]
+                args = oargs[1:]
             if truth(op(*args)):
                 return True
             if diff:
-                raise AssertionError(diff(*args))
+                raise AssertionError(diff(*oargs))
             else:
-                raise AssertionError(op.__name__, *args)
+                raise AssertionError(op.__name__, *oargs)
         return call_operator
 
 
