@@ -5,7 +5,7 @@ import builtins         # operators for asserting
 class _Operators:
 
     def __call__(self, tester, f):
-        return f
+        return
 
     def lookup(self, runner, name, truth=bool):
         if name in ('comp', 'complement'):
