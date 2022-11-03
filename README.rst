@@ -9,8 +9,8 @@ The most prominent differences in how autotest works are:
 #) testing stops on the first failure with a standard Python stack trace
 #) when starting your production code, it runs all tests in this environment
 
-Feaatures
----------
+Features
+--------
 
 In addition, autotest features the following. It
 
@@ -40,17 +40,18 @@ Autotest began, as a recalcitrant move, with the following decorator above my te
   def test(f):
       print(f.__qualname__)
       f()
-      
+
   def i_need_testing(x):
       return x
-      
+
   @test
   def a_test():
       assert 42 == i_need_testing(42)
 
 That turned out to work so well that it grew out to what we have here today.
 
-    
+
+
 1) An example
 =============
 
@@ -69,40 +70,48 @@ Autotest has a global root tester that can have an arbitrarily deep and wide tre
         assert 9 == area(3, 3)
         assert 6 == area(2, 3)
 
-Its creates a subtester using get_tester(). The resulting test object main access point to all functionality of autotest.  In this case, it is used as a decorator to mark and execute a test function.
+Its creates a subtester using ``get_tester()``. The resulting test object main access point to all functionality of autotest.  In this case, it is used as a decorator to mark and execute a test function.
 
 
 2) Basic API
 ============
 
-The module level API is used once per module to get a tester object. After that the resulting test object is the main API.
+The API falls apart into four categories
 
-Module Level
-------------
+#) a module level API
+#) a tester object API
+#) core options
+#) hooks API
+
+
+Module Level API
+----------------
 
 The autotest core consist of the module level functions:
 
 
-''basic_config(\*\*options)''
+``basic_config(**options)``
 
-Sets options of the root tester. This can be called only once, before ''get_tester()''. If not called, default options are used. This typicalliy happens in the main of an application or in a program for running tests.
-
-
-''get_tester(name=None)''
-
-When name is ''None'' returns the root tester. Otherwise it returns a named child of the root.  Name is a potentially hierarchical name separated by dots. Each level in this hierarchy becomes a child of the one preceding it. The last tester object is returned. Thus, ''get_tester("main.sub")'' creates a child ''main'' of the root and a child 'sub' of the child ''main''. It returns that latter.
-
-Testers created this way become globally available. A call to ''get_tester()'' with the same name repeatedly will return the same tester.
-
-Recommended is to use ''test = get_tester(__name__)'' at the start of your module. Using subtesters is a powerful way of organising tests. See the source code of autotest for many examples.
+Sets options of the root tester. This can be called only once, before ``get_tester()``. If not called, default options are used. This typicalliy happens in the main of an application or in a program for running tests.
 
 
-Tester Objects
---------------
+``get_tester(name=None)``
 
-A tester object as returned from ''get_tester()'' supports the following functions:
+When name is ``None`` returns the root tester. Otherwise it returns a named child of the root.  Name is a potentially hierarchical name separated by dots. Each level in this hierarchy becomes a child of the one preceding it. The last tester object is returned. Thus, ``get_tester("main.sub")`` creates a child ``main`` of the root and a child ``sub`` of the child ``main``. It returns the latter.
 
-''__call__'' as a decorator for marking functions as tests:
+Testers created this way become globally available. A call to ``get_tester()`` with the same name repeatedly will return the same tester.
+
+Recommended is to use ``test = get_tester(__name__)`` at the start of your module. Using subtesters is a powerful way of organising tests. See the source code of autotest for many examples.
+
+
+Tester Objects API
+------------------
+
+A tester object as returned from ``get_tester()`` supports the following functions:
+
+``__call__(func)``
+
+A decorator for marking functions as tests:
 
 .. code:: python
 
@@ -110,14 +119,16 @@ A tester object as returned from ''get_tester()'' supports the following functio
    def function_marked_as_test():
        pass
 
-This runs the given function as a test and returns None. Thus, ''function_marked_as_test'' becomes None and the function is garbage collected subsequently. Keeping the test is possible with an option.
+This runs the given function as a test and returns None. Thus, ```function_marked_as_test()`` becomes None and the function is garbage collected subsequently. Keeping the test is possible with an option.
 
 
-''__call__'' as a callable for setting options:
+``__call__(**options)``
+
+A way for setting options:
 
 .. code:: python
 
-   @test(**options)
+   @test(keep=True, my_option=42)
    def function_marked_as_test():
        pass
 
@@ -128,36 +139,49 @@ This creates an anonymous child tester with given options.  If you get creative,
    def function_not_marked():
        pass
 
-   test(**options)(function_not_marked)
+   test(keep=True, my_option=42)(function_not_marked)
    # or
-   test(function_not_marked, **options)
+   test(function_not_marked, keep=True, my_option=42)
 
-All methods are 100% equivalent.
+All methods are 100% equivalent. In fact, the full signature is:
 
+``__call__(*funcs, **options)``
 
-''getChild(\*\*options)''
-
-
-''addHandler(handler)''
-
-Adds a Python Logger object (from standard module logging) as a handler for output. Child testers will delegate to their parents handlers if they have no handlers themselves. If no handler is present output will be send to the root logger (logging.getLogger()). See main for an example.
+So you can run multiple test functions with the given options at once.
 
 
-''fail(\*args, \*\*kwargs)''
+``getChild(**options)``
 
-Use as guard in tests. Raises AssertionError with the given args and kwargs, appending kwargs to args.
+This function is an alias for ``__call__(**options)``. It does exactly the same.
 
 
-''log_stats()''
+``addHandler(handler)``
+
+Adds a Python Logger object (from standard module ``logging``) as a handler for output. Child testers will delegate to their parents handlers if they have no handlers themselves. If no handler is present output will be send to the root logger (``logging.getLogger()``). See ``__main__.py`` for an example.
+
+This method is most useful on the root tester, but it can be set anywhere.
+
+
+``fail(*args, **kwargs)``
+
+Use as guard in tests. Raises ``AssertionError`` with the given ``args`` and ``kwargs``, appending ``kwargs`` to ``args``.
+
+
+``log_stats()``
 
 Log the current value of the statistics to the configured output.
 
 
+Core Options
+------------
 
-3) Core Options
-===============
+The core knows three options. Hooks may support additional options. Options can be given to any of these calls:
 
-The core knows three options. Hooks may support additional options.
+- ``basic_config(**options)``
+- ``__call__(**options)``
+- ``getChild(**options)``
+
+Child testers inherit options from their parents and can override them temporarily.
 
 ======  =======  =======   ==========================================================
 option  type     default   Explanation
@@ -181,28 +205,40 @@ Normally, autotest runs a test as soon as it discovers it and then discards it. 
   def another_test_for_running_later():
     pass
 
-  test.isfunction(another_test_for_running_later)
   another_test_for_running_later()
 
 
-In the code above, ''test.isfunction()'' comes from a standard hook ''operator.py'', see below.
 
 
 
-3) API for hooks
-================
+Hooks API
+---------
+
+Hooks are callable objects, optionally also implementing ``lookup()``.  Autotest core only dispatches to the hooks and most useful functionality is implemented in standaard hooks.
+
+Installing a hook is done with the ``hooks`` option.
+
 
 ''__call__(tester, func)''
+
+A hook is an ordinary function accepting arguments ``tester`` and ``func``. It is called when a test function is discovered, usually when the tester is used as decorator. The ``tester`` argument supports the Options API so hooks can manipulate options in the current tester. It should return the same func or a wrapper. If it returns ``None`` evaluating stops completely.
+
+Note that all hooks get to process ``func`` in turn, so be nice to them an use ``functools.wraps`` when you wrap.
 
 
 ''lookup(tester, name)''
 
-Implemented by a hook.
+Implemented by a hook that wants to intercept attribute lookups on the tester object. The hook can no longer be a simple function but must be an object understanding ``__call__(tester, func)`` and ``lookup(tester, name)``. It is called when an attribute lookup takes place on the tester. When it returns a value, lookup stops. When it raises AttributeError, it continues with the next hook.
 
 
-''option_get(name, default=None)''
+Options API
+-----------
 
-Returns the value for option with given name for 'this' tester or its closesed parent.
+The Options API is meant for hook manipulating options. Options ar hierarchically registered, that is, each tester can have local values for options, and lookup missing ones in its parent.
+
+``option_get(name, default=None)``
+
+Returns the value for option with given name for this tester or its closesed parent.
 
 
 ''option_setdefault(name, default)''
@@ -213,6 +249,7 @@ Set option with name on 'this' tester with 'value'.
 ''option_enumerate(name)''
 
 Enumerates all values for the option with the give name, starting with this tester, up to all its parent. List and tuple values are reversed and flattened.
+
 
 
 
