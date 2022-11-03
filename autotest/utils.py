@@ -50,7 +50,7 @@ def bind_names(bindings, names, frame):
     return bind_names(bindings, rest, frame.f_back)
 
 
-def bind_1_frame_back(func):
+def extend_closure(func):
     """ Binds the unbound vars in func to values found on the stack """
     func2 = types.FunctionType(
                func.__code__,                      # code

@@ -322,10 +322,12 @@ def setup_correct():
             sorted(tf.getnames()), diff=lambda a, b: set(a).symmetric_difference(set(b)))
         tf.close()
 
+
 """
 We put these last, as printing any debug/trace messages anywhere in th code causes this
 to fail.
 """
+
 
 if 'AUTOTESTSELFTEST' not in os.environ:
     os.putenv('AUTOTESTSELFTEST', 'ACTIVE')

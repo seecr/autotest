@@ -9,7 +9,7 @@ import sys
 import os
 
 from .utils import asyncio_filtering_exception_handler, ensure_async_generator_func
-from .utils import bind_1_frame_back, frame_to_traceback
+from .utils import extend_closure, frame_to_traceback
 from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
@@ -46,7 +46,7 @@ class _Fixtures:
         if name == 'fixture':
             def fixture(func):
                 assert inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func), func
-                bound_f = bind_1_frame_back(func)  # TODO extract/move to binder? how?
+                bound_f = extend_closure(func)
                 add_fixture(tester, bound_f)
                 return bound_f
             return fixture

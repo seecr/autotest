@@ -1,9 +1,9 @@
 
-from .utils import bind_1_frame_back # redefine placeholder
+from .utils import extend_closure # redefine placeholder
 
 class _Binder:
     def __call__(self, runner, func):
-        return bind_1_frame_back(func)
+        return extend_closure(func)
 
 
 binder_hook = _Binder()
