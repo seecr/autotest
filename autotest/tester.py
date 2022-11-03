@@ -81,7 +81,7 @@ class Runner: # aka Tester
 
 
     def option_get(self, name, default=None):
-        return self._options.get(name, default)
+        return sel
 
 
     def option_setdefault(self, name, default):
@@ -107,7 +107,7 @@ class Runner: # aka Tester
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
             self._name or 'root',                     # name of logger
-            self.option_get('level', 40),             # log level   #TODO
+            self.option_get('level', 40),             # log level   #TODO is from hook
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
