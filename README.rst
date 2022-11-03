@@ -1,22 +1,23 @@
 Autotest: Simpler Test Runner for Python
 ========================================
 
-Autotest is a simple test tool for Python.
-
-Tests are just functions and are part of the application code; not something separate.
+Autotest is a simple an extensible test tool for Python. Tests are just functions and tests are part of the application code; not something separate.
 
 The most prominent differences in how autotest works are:
 
-#) gathering tests is automatic and selects precisely what you actually use in your code, including other packages or projects that you might be developing at the same time
-#) it stops on the first failure with a standard Python stack trace
+#) gathering tests is automatic and follows the structure of your code
+#) testing stops on the first failure with a standard Python stack trace
 #) when starting your production code, it runs all tests in this environment
 
-In addition, it features the following:
+Feaatures
+---------
 
-#) works in a familiar Pythonic way, using standard libraries as much as possible,
-#) based on operator, pdb, logger, difflib, etc,
+In addition, autotest features the following. It
+
+#) works in a familiar Pythonic way, no magic,
+#) is based on operator, pdb, logger, difflib, etc,
 #) seamlessly scales from microtests to systemtests,
-#) discovers tests through the importing mechanism, no separate test tree (although you can),
+#) discovers tests through the importing mechanism,
 #) crosses module, package and project boundaries easily,
 #) makes refactorings easier, even across projects, tests just move with code,
 #) executes tests immediatly after discovery,
@@ -25,11 +26,31 @@ In addition, it features the following:
 #) there are fixtures (context managers) like in other test tools,
 #) async tests and fixtures are fully supported,
 #) most functionality is in hooks which you can extend easily,
-#) there is a root tester which cvan have subtesters
+#) there is a root tester which can have subtesters
 #) output is send to a logger.
 
-Although autotest enables a new, more agile, rigorous and Pythonic way of testing, since there is little magic and tests are just functions, you are free to organise them as you wish. You can even do it the Python unittest way, if you want.
+Although autotest promotoes an agile, rigorous and Pythonic way of testing, since there is little magic and tests are just functions, you are free to organise them as you wish. You can even do it the Python unittest way, if you want.
 
+History
+-------
+Autotest began, as a recalcitrant move, with the following decorator above my tests:
+
+.. code:: python
+
+  def test(f):
+      print(f.__qualname__)
+      f()
+      
+  def i_need_testing(x):
+      return x
+      
+  @test
+  def a_test():
+      assert 42 == i_need_testing(42)
+
+That turned out to work so well that it grew out to what we have here today.
+
+    
 1) An example
 =============
 
@@ -48,10 +69,10 @@ Autotest has a global root tester that can have an arbitrarily deep and wide tre
         assert 9 == area(3, 3)
         assert 6 == area(2, 3)
 
-Its creates a subtester using get_tester(). The resuling test object main access point to all functionality of autotest.  In this case, it is used as a decorator to mark and execute a test function.
+Its creates a subtester using get_tester(). The resulting test object main access point to all functionality of autotest.  In this case, it is used as a decorator to mark and execute a test function.
 
 
-2) Basis API
+2) Basic API
 ============
 
 The module level API is used once per module to get a tester object. After that the resulting test object is the main API.
