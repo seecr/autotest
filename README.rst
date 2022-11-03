@@ -31,6 +31,7 @@ In addition, it features the following:
 Although autotest enables a new, more agile, rigorous and Pythonic way of testing, since there is little magic and tests are just functions, you are free to organise them as you wish. You can even do it the Python unittest way, if you want.
 
 1) An example tells the most
+============================
 
 .. code:: python
 
@@ -47,6 +48,7 @@ In this case, 'test' is used a a decorator to mark a test function. The test obj
 
 
 2) Two more ways to do asserts
+==============================
 
 Hook operator.py
 
@@ -57,17 +59,27 @@ Hook operator.py
         test.all(x > 1 for x in [1,2,3])
         test.startswith("rumbush", "rum")
 
-This shows how autotest stays close to Python as we know it. It does nothing more than looking up the given attribute in three places:
+
+This shows how autotest stays close to Python as we know it. It does nothing more than looking up the given attribute in four places:
 
 #) module operator,
+   e.g.: test.gt(2, 1)
+
 #) module builtins,
-#) the first argument.
+   e.g.: test.isinstance('aa', str)
+
+#) module inspect,
+   e.g.: test.isfunction(len)
+
+#) the first argument,
+   e.g.: test.isupper(<str>)
 
 The benefits of this is that we do not have to learn new methods, that the assert functions are not limited, and that autotest can print the arguments for us on failure.
 
 
 
-3) Fixtures (context managers):
+3) Fixtures (context managers)
+==============================
 
 Hook fixtures.py
 
@@ -104,46 +116,60 @@ There standard fixtures builtin for:
 
 
 
-4) Extended closure
-
-Hook binder.py
-
-
 5) Filtering
+============
 
 Hook filter.py
 
 
 6) Diffs
+========
 
 Hook diffs.py
 
 
-7) Async all the way
-
-Hook asyncer.py
-
-
-8) Wildcards
-
-Hook wildcard.py
-
-
-9) Levels
-
-Hook levels.py
-
-
-10) POD print
+7) POD diffs
+=============
 
 Hook prrint.py
 
 
-11) Misc
+8) Async all the way
+====================
 
-Hooks introduce their own options, but there are two main options:
+Hook asyncer.py
 
-Options:
+
+9) Wildcards
+============
+
+Hook wildcard.py
+
+
+10) Levels
+==========
+
+Hook levels.py
+
+
+11) Extended closure
+====================
+
+Hook binder.py
+
+
+12) Runner main
+===============
+
+autotest [options] <module>
+
+--filter
+
+
+13) Misc
+========
+
+Hooks introduce their own options, but there are two main options.
 
 Normally, autotest runs a test as soon as it discovers it and the discards it.
 
@@ -174,5 +200,4 @@ run     boolean  True      Run immediately or not.
 
   test.isinstance(another_test, FunctionType)
   another_test()
-
 

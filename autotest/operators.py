@@ -1,11 +1,12 @@
 
 import operator         # operators for asserting
 import builtins         # operators for asserting
+import inspect          # operators for asserting
 
 class _Operators:
 
     def __call__(self, tester, f):
-        return
+        return f
 
     def lookup(self, runner, name, truth=bool):
         if name in ('comp', 'complement'):
@@ -20,6 +21,8 @@ class _Operators:
                 op = getattr(operator, name)
             elif hasattr(builtins, name):
                 op = getattr(builtins, name)
+            elif hasattr(inspect, name):
+                op = getattr(inspect, name)
             else:
                 op = getattr(args[0], name)
                 args = oargs[1:]
@@ -67,5 +70,12 @@ def operators_test(self_test):
         class B(A): pass
         self_test.issubclass(B, A)
         self_test.hasattr([], 'append')
+
+
+    @self_test(keep=True)
+    def use_inspect():
+        def f():
+            pass
+        self_test.isfunction(f)
 
 
