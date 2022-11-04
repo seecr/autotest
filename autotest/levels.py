@@ -39,16 +39,23 @@ levels = {
 }
 
 
+def numeric_level(l):
+    return levels[l.upper()] if isinstance(l, str) else l
+
+
 class _Levels:
 
     def __call__(self, tester, func):
-        levels = list(tester.option_enumerate('level')) or [0]
-        threshold = max(levels)
-        mylevel = levels[0]
+        lvls = [numeric_level(l) for l in tester.option_enumerate('level')] or [0]
+        threshold = max(lvls)
+        mylevel = lvls[0]
         if mylevel >= threshold:
             return func
 
     def lookup(self, tester, name):
+        if name == 'level':                        # Tester asks for 'level'; we're a bit intimate
+            o = tester.option_get(name, 40)
+            return numeric_level(o)
         if level := levels.get(name.upper()):
             return tester(level=level)
         raise AttributeError
@@ -70,7 +77,7 @@ def levels_test(self_test):
         test.eq([True, None], runs)
 
         runs = [None, None]
-        with test.child(level=INTEGRATION) as tst:
+        with test.child(level='integration') as tst:
             @tst.integration
             def a_integration_test_sometimes_runs():
                 runs[0] = True

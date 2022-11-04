@@ -81,7 +81,7 @@ class Runner: # aka Tester
 
 
     def option_get(self, name, default=None):
-        return sel
+        return self._options.get(name, default)
 
 
     def option_setdefault(self, name, default):
@@ -107,7 +107,7 @@ class Runner: # aka Tester
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
             self._name or 'root',                     # name of logger
-            self.option_get('level', 40),             # log level   #TODO is from hook
+            getattr(self, 'level'),                   # log level, bit intimate with levels_hook ;-(
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -160,12 +160,13 @@ class any_number:
 
 
 from .operators import operators_hook
+from .levels import levels_hook
 
 from sys import argv
 if 'autotest.selftest' in argv:
     argv.remove('autotest.selftest')
     self_test = Runner('autotest-self-tests',
-        hooks=(operators_hook,)) # separate runner for bootstrapping/self testing
+        hooks=(operators_hook, levels_hook)) # separate runner for bootstrapping/self testing
 else:
     class Ignore:
         def __call__(self, runner, func):
@@ -297,7 +298,7 @@ def stringio_handler():
 
 def logging_runner(name):
     s, myhandler = stringio_handler()
-    tester = Runner(name) # No hooks
+    tester = Runner(name, hooks=[levels_hook])
     tester.addHandler(myhandler)
     return tester, s
 

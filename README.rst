@@ -384,7 +384,8 @@ For more general purpose diff functions, see the hook ``diffs.py``.
 Fixtures
 --------
 
-Hook fixtures.py
+Hook ``fixtures.py`` introduces fixtures as seen in other test tools. The ``test.fixture`` attribute regsters the next function as a context manager. A fixture is a Python ``contextmanager`` as can be used as such, or it can be specified as a formal argument to a test function. Fixtures accept arguments themselves by using the ':' notation.
+
 
 .. code:: python
 
@@ -392,24 +393,20 @@ Hook fixtures.py
   def answer(a=42):
     yield a
 
-  with test.answer as p:
+  with test.answer as p:               # as a context manager
     test.eq(42, p)
 
   @test
-  def prope_the_universe(answer):
+  def prope_the_universe(answer):      # as a formal argument
     test.eq(42, answer)
 
   @test
-  def something_wrong(answer:43):
+  def something_wrong(answer:43):      # with argument 43
     test.ne(42, answer)
     test.eq(43, answer)
 
 
-The .fixture attribute administers the next function as a context manager. It can be used as such, but it can also be declares as argument to the test function.
-
-Fixtures accept arguments themselves by using the ':' notation.
-
-There standard fixtures builtin for:
+There are standard fixtures for:
 
 #) stdout
 #) stderr
@@ -417,7 +414,9 @@ There standard fixtures builtin for:
 #) raises
 #) slow_callback_duration
 
+Fixtures can be async (``async def``) but async fixtures can only be used in async tests. The ``slow_callback_duration`` fixture sets the corresponding setting in ``asyncio``, see ``asyncer`` for an explanation.
 
+The option ``timeout=<time in s>`` specifies the maximum amount in seconds a fixture can run. After that an ``TimeoutError`` is raised.
 
 Filtering
 ------------
@@ -449,6 +448,10 @@ Async
 -----
 
 Hook ``asyncer.py`` supports ``asyncio`` tests defined with ``async def``. Async tests can contain other async tests, however due to limitations in Python (being that async is partially a syntax feature and not fully dynamic) this causes nested async tests to be executed in a separate event loop in a separate thread.
+
+The option ``timeout=<time in s>`` specifies the maximum amount in seconds a test can run. After that an ``TimeoutError`` is raised.
+
+The option ``slow_callback_duration=<time in s>`` specifies the time after which ``asyncio`` begins to emit warnings about tests running too long.
 
 
 Wildcards
@@ -491,13 +494,11 @@ Tests can also be put at a certain level with an option:
 
 .. code:: python
 
-  from autotest.levels import CRITICAL.    # TODO should be test.CRITICAL
-
-  @test(level=CRITICAL)
+  @test(level='critical')
   def a_critical_test():
       pass
 
-  with test.child(level=CRITICAL) as critical:
+  with test.child(level='critical') as critical:
        @critical
        def one():
            pass
@@ -509,17 +510,60 @@ Tests can also be put at a certain level with an option:
 Extended closure
 ----------------
 
-Hook binder.py
+The hook ``binder.py`` enables binding to class definition in the making. The namespace of a class being defined is not available inside functions being defined in the class body.
+
+.. code:: python
+
+  def function_a():
+      a = 42
+      def function_b():
+          assert a = 43
+      function_b()
+
+  function_a()
+
+  class class_a:
+      a = 42
+      def function_b():
+          assert a = 43
+      function_b()            # NameError: name 'a' is not defined
+
+In order to be able to embed tests in class definitions, the binder hook extends the binding of freevars in test functions to include those of the enclosing class.
+
+This hook is enabled by default, but only performs binding when the option ``bind=True`` is present.
+
+.. code:: python
+
+  class class_a:
+      a = 42
+      @test(bind=True)
+      def function_b():
+          assert a = 43
 
 
 3. Runner main
 ==============
 
-autotest [options] <module>
+..
+  Usage: autotest [options] module
 
---filter
+  Options:
+    -h, --help            show this help message and exit
+    -f FILTER, --filter=FILTER
+                        only run tests whose qualified name contains FILTER
+    -l LEVEL, --level=LEVEL
+                        only run tests whose level is >= LEVEL
 
 
 4. Misc
 =======
+
+**TODO**
+
+- unify the setting of slow_callback_duration for the hooks asyncer and fixtures (the first uses an option, the second uses a fixture)
+- unify the use of timeouts:
+  - in asyncer
+  - in fixtures
+  - synchronous code
+  - raise same exception
 

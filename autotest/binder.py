@@ -3,7 +3,9 @@ from .utils import extend_closure # redefine placeholder
 
 class _Binder:
     def __call__(self, runner, func):
-        return extend_closure(func)
+        if runner.option_get('bind', False):
+            return extend_closure(func)
+        return func
 
 
 binder_hook = _Binder()
@@ -14,7 +16,7 @@ def binder_test(self_test):
 
     class binding_context:
         a = 42
-        @self_test2(keep=True)
+        @self_test2(keep=True, bind=True)
         def one_test():
             assert a == 42
         a = 43

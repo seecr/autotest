@@ -81,7 +81,7 @@ diff_test(self_test)
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 109, 'run': 97}, self_test.stats)
+    self_test.eq({'found': 110, 'run': 98}, self_test.stats)
 
 
 def assemble_root_runner(**options):
@@ -137,7 +137,7 @@ def root_tester_assembly_test(test):
     # binding hook
     class A:
         a = 42
-        @test
+        @test(bind=True)
         def bind():
             assert a == 42
             N[0] += 1
@@ -342,6 +342,19 @@ if 'AUTOTESTSELFTEST' not in os.environ:
 
 
     @self_test2
+    def main_without_help(stdout):
+        os.system("PYTHONPATH=. python autotest --help")
+        s = stdout.getvalue()
+        assert "Usage: autotest [options] module" in s
+        assert "-h, --help            show this help message and exit" in s
+        assert "-f FILTER, --filter=FILTER" in s
+        assert "only run tests whose qualified name contains FILTER" in s
+        assert "-l LEVEL, --level=LEVEL" in s
+        assert "only run tests whose level is >= LEVEL" in s
+
+
+
+    @self_test2
     def main_test(stderr, stdout):
         import os
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
@@ -379,37 +392,63 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         lns = stdout.getvalue().splitlines()
         assert ['Usage: autotest [options] module', ''] == lns, lns
         lns = stderr.getvalue().splitlines()
-        assert len(lns) == 141, len(lns) # number of logged tests, sort of
+        assert len(lns) == 142, len(lns) # number of logged tests, sort of
 
 
     @self_test2
     def main_via_bin_script_with_autotest_on_path(stdout, stderr):
         os.system(f'PATH=./bin:$PATH autotest autotest/tests/tryout2.py')
-        o = stdout.getvalue()
         e = stderr.getvalue()
-        self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test_succeeds")
-        self_test2.contains(o, "TEST:UNIT:root:stats:found: 1, run: 1:")
         self_test2.eq('', e)
+        o = stdout.getvalue()
+        self_test2.startswith(o, "importing autotest.tests.tryout2")
+        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
+        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
+        self_test2.contains(o, "TEST:PERFORMANCE:autotest.tests.tryout2:one_performance_test")
+        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 3:")
 
 
     @self_test2
     def main_via_bin_script_in_cur_dir(stdout, stderr):
         os.system(f'(cd bin; ./autotest autotest/tests/tryout2.py)')
-        o = stdout.getvalue()
         e = stderr.getvalue()
-        self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test_succeeds")
-        self_test2.contains(o, "TEST:UNIT:root:stats:found: 1, run: 1:")
         self_test2.eq('', e)
+        o = stdout.getvalue()
+        self_test2.startswith(o, "importing autotest.tests.tryout2")
+        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
+        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
+        self_test2.contains(o, "TEST:PERFORMANCE:autotest.tests.tryout2:one_performance_test")
+        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 3:")
 
     @self_test2
     def main_with_filter(stdout, stderr):
-        os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py --filter one_simple_test")
-        o = stdout.getvalue()
+        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --filter one_simple")
         e = stderr.getvalue()
-        assert 'one_simple_test' in o
-        assert 'one_more_test' not in o
-        assert 'found: 2, run: 1' in o
         assert '' == e, e
+        o = stdout.getvalue()
+        assert 'one_simple_test' in o
+        assert 'one_integration_test' not in o
+        assert 'one_performance_test' not in o
+        assert 'found: 3, run: 1' in o
 
+    @self_test2
+    def main_with_level_unit(stdout, stderr):
+        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --level unit")
+        e = stderr.getvalue()
+        assert '' == e, e
+        o = stdout.getvalue()
+        assert 'one_simple_test' in o, o
+        assert 'one_integration_test' not in o, o
+        assert 'one_performance_test' not in o
+        assert 'found: 3, run: 1' in o, o
+
+    @self_test2
+    def main_with_level_integration(stdout, stderr):
+        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --level integration")
+        e = stderr.getvalue()
+        assert '' == e, e
+        o = stdout.getvalue()
+        assert 'one_simple_test' in o, o
+        assert 'one_integration_test' in o, o
+        assert 'one_performance_test' not in o
+        assert 'found: 3, run: 2' in o, o

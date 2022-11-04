@@ -157,16 +157,16 @@ def integration_test(test):
         def temp_sync(tmp_path):
             assert tmp_path.exists()
 
-        @test
+        @test(bind=True)
         def temp_file_removal(tmp_path):
             path[0] = tmp_path / 'aap'
             path[0].write_text("hello")
 
-        @test
+        @test(bind=True)
         def temp_file_gone():
             assert not path[0].exists()
 
-        @test
+        @test(bind=True)
         async def temp_async(tmp_path):
             assert tmp_path.exists()
 
