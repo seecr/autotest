@@ -10,17 +10,17 @@ A Simpler Test Tool for Python
 
 Autotest is a simple and extensible test tool for Python. The most prominent differences in how autotest works are:
 
-- tests are ordinary functions,
-- tests are part of the application code,
-- gathering tests is automatic and follows the structure of your code,
-- testing stops on the first failure with a standard Python stack trace,
-- when starting your production code, it runs all tests in this environment.
+- tests are *ordinary functions* and are part of the application code,
+- gathering tests is *automatic* and follows the structure of your code,
+- testing *stops on the first failure* with a standard Python stack trace,
+- in *production you also run the tests*, at least at startup,
+- all things *async fully supported*.
 
-The most prominent feature is that it automatically tests everything your code actually uses. This is particularly useful when you develop multiple projects in conjunction as you cannot forget to rerun tests for the one while you work on the other.
+The most prominent feature is that it automatically tests everything your code *actually* uses. This is particularly useful when you develop multiple projects in conjunction as you cannot forget to rerun tests for the one while you work on the other.
 
 History
 -------
-Autotest began, as a recalcitrant move, with the following decorator above my tests:
+Autotest began, as a recalcitrant move away from the frameworks, with the following decorator above my tests:
 
 .. code:: python
 
@@ -43,28 +43,29 @@ Features
 
 Meanwhile autotest gained some features. It
 
-#) works in a familiar Pythonic way, no magic,
-#) is based on standard modules operator, pdb, logger, difflib, inspect, etc,
-#) seamlessly scales from microtests to systemtests,
-#) discovers tests through the importing mechanism,
+#) works in a familiar *Pythonic* way, no magic,
+#) is based on *standard modules* operator, pdb, logger, difflib, inspect, etc,
+#) seamlessly scales from *microtests* to *systemtests*,
+#) discovers tests through the *importing mechanism*,
 #) crosses module, package and project boundaries easily,
-#) makes refactoring easier, even across projects, tests just move with code,
-#) executes tests immediately after discovery,
-#) stops on first failure, fits into a fast REPL-style way of working,
-#) supports levels: unit, integration, performanc etc.,
-#) there are fixtures (context managers) like in other test tools,
-#) async tests and fixtures are fully supported,
-#) most functionality is in hooks which you can extend easily,
-#) there is a root tester which can have subtesters
-#) output is send to a logger.
+#) *makes refactoring easier*, even across projects, tests just move with code,
+#) executes tests *immediately* after discovery,
+#) *stops on first failure*, fits into a fast REPL-style way of working,
+#) supports *levels*: unit, integration, performanc etc.,
+#) there are *fixtures* (context managers) like in other test tools,
+#) *async tests and fixtures* are fully supported,
+#) most functionality is in *hooks* which you can extend easily,
+#) there is a *root* tester which can have *subtesters*,
+#) output is send to a *logger*.
 
 Although autotest promotes an agile, rigorous and Pythonic way of testing, since there is little magic and tests are just functions, you are free to organise them as you wish. You can even do it the Python unittest way, if you want.
+
 
 
 An example
 ----------
 
-Autotest has a global root tester that can have an arbitrarily deep and wide tree of child testers. A typical module uses it as follows.
+Autotest has a global root tester that can have an arbitrarily deep and wide tree of child testers. A typical module uses it as follows:
 
 .. code:: python
 
@@ -79,7 +80,11 @@ Autotest has a global root tester that can have an arbitrarily deep and wide tre
         assert 9 == area(3, 3)
         assert 6 == area(2, 3)
 
-Its creates a subtester using ``get_tester()``. The resulting test object main access point to all functionality of autotest.  In this case, it is used as a decorator to mark and execute a test function.
+Its creates a subtester using ``get_tester()``. The resulting tester object is the main access point to all functionality of autotest.  In this case, it is used as a decorator to mark and execute a test function.
+
+More on assert later.
+
+
 
 2. Basic API
 ============
@@ -89,11 +94,11 @@ General
 
 **Tester objects**
 
-Autotest has a hierarchical tree of test runners called ``tester`` objects, a bit like Pythons logging facility. The main program is supposed to configure the root (although it doesn't have to) with various options. Testers lower in the tree can override these options during their lifetime.
+Autotest has a hierarchical tree of test runners called ``tester`` objects, a bit like Pythons logging facility. The main program is supposed to configure the root (although it doesn't have to) with various options. Testers lower in the tree can override these options.
 
 **Hooks**
 
-Tester objects are use to mark and execute tests and to supply additional options. Any functionality beyond that is provides by hooks, which themselves are just options that can be overridden. There are hooks for:
+Tester objects only mark and execute tests, optionally with options. Any functionality beyond that is provided by hooks, which themselves are just options that can be overridden. There are hooks for:
 
 - fixtures
 - operators
@@ -103,9 +108,12 @@ Tester objects are use to mark and execute tests and to supply additional option
 - wildcards
 - levels
 
+These hooks introduce new functionality by extending the API of the tester object.
+
+
 **API**
 
-The API falls apart into four categories:
+The API falls apart into five categories:
 
 - a module level API,
 - a tester object API,
@@ -117,12 +125,12 @@ The API falls apart into four categories:
 Module Level API
 ----------------
 
-The autotest core consist of the module level functions:
+The autotest core consist of two module level functions:
 
 
 ``basic_config(**options)``
 
-Sets options of the root tester. This can be called only once, before ``get_tester()``. If not called, default options are used. This typicalliy happens in the main of an application or in a program for running tests.
+Sets options for the root tester. This can be called only once, before ``get_tester()``. If not called, default options are used. This typicalliy happens in the main of an application or in a program for running tests.
 
 
 ``get_tester(name=None)``
@@ -137,7 +145,7 @@ Recommended is to use ``test = get_tester(__name__)`` at the start of your modul
 Tester Objects API
 ------------------
 
-A tester object as returned from ``get_tester()`` supports the following functions:
+A tester object as returned from ``get_tester()`` support the following methods:
 
 ``__call__(func)``
 
@@ -149,7 +157,7 @@ A decorator for marking functions as tests:
    def function_marked_as_test():
        pass
 
-This runs the given function as a test and returns ``None``. Thus, ```function_marked_as_test()`` becomes ``None`` and the function is garbage collected subsequently. Keeping the test is possible with an option.
+This runs the given function as a test and returns ``None``. Thus, ``function_marked_as_test()`` becomes ``None`` and the function is garbage collected subsequently. Keeping the test is possible with an option.
 
 
 ``__call__(**options)``
@@ -162,7 +170,7 @@ A way for setting options:
    def function_marked_as_test():
        pass
 
-This creates an anonymous child tester with given options.  If you get creative, you could also run:
+This creates an *anonymous child* tester with given options.  If you get creative, you could also run:
 
 .. code:: python
 
@@ -186,7 +194,7 @@ This function is an alias for ``__call__(**options)``. It does exactly the same.
 
 ``child(**options)``
 
-This creates a child but returns a context manager. Afterwards it will log the number of tests found and run.
+This creates a child and returns a context manager. Afterwards it will log the number of tests found and run.
 
 .. code:: python
 
@@ -199,19 +207,19 @@ This creates a child but returns a context manager. Afterwards it will log the n
 
 ``addHandler(handler)``
 
-Adds a Python Logger object (from standard module ``logging``) as a handler for output. Child testers will delegate to their parents handlers if they have no handlers themselves. If no handler is present output will be send to the root logger (``logging.getLogger()``). See ``__main__.py`` for an example.
+Adds a Python Logger object (from standard module ``logging``) as a handler for output. Child testers will delegate to their parents if they have no handlers themselves. If no handler is present output will be send to the root logger (``logging.getLogger()``). See ``__main__.py`` for an example.
 
 This method is most useful on the root tester, but it can be set anywhere.
 
 
 ``fail(*args, **kwargs)``
 
-Use as guard in tests. Raises ``AssertionError`` with the given ``args`` and ``kwargs``, appending ``kwargs`` to ``args``.
+Use as guard in tests. Raises ``AssertionError`` with the given ``args``, appending ``kwargs`` to ``args``.
 
 
 ``log_stats()``
 
-Log the current value of the statistics to the configured output. The actual log record contains lots of data, but default only the message part is printed. See ``__main__.py`` for how to configure loggers.
+Log the current value of the statistics to the configured output. The actual log record contains lots of data, but by default only the message is printed. See ``__main__.py`` for how to configure loggers.
 
 
 Core Options
@@ -225,7 +233,7 @@ The core knows three options. Hooks may support additional options. Options can 
 - ``child(**options)``
 
 
-Child testers inherit options from their parents and can override them temporarily.
+Child testers inherit options from their parents and can override them.
 
 ======  =======  =======   ==========================================================
 option  type     default   Explanation
@@ -267,7 +275,9 @@ Installing a hook is done with the ``hooks`` option.
       def some_test():
           pass
 
-A hook is an ordinary function accepting arguments ``tester`` and ``func``. It is called when a test function is discovered, usually when the tester is used as decorator. The ``tester`` argument supports the Options API so hooks can manipulate options in the current tester. It should return the same func or a wrapper. If it returns ``None`` evaluating stops completely.
+``__call__(tester, func)``
+
+A hook is an ordinary function accepting arguments ``tester`` and ``func``. It is called when a test function is discovered, usually when the tester is used as decorator. The ``tester`` argument supports the ``Options API`` so hooks can manipulate options in the current tester. It should return the same ``func`` or a wrapper. If it returns ``None`` evaluating stops completely.
 
 As an example, here is the complete hook for filtering:
 
@@ -278,16 +288,12 @@ As an example, here is the complete hook for filtering:
       if f in func.__qualname__:
           return func
 
-
-``__call__(tester, func)``
-
-
 Note that all hooks get to process ``func`` in turn, so be nice to them an use ``functools.wraps`` when you wrap.
 
 
 ``lookup(tester, name)``
 
-Implemented by a hook that wants to intercept attribute lookups on the tester object. The hook can no longer be a simple function but must be an object understanding ``__call__(tester, func)`` and ``lookup(tester, name)``. It is called when an attribute lookup takes place on the tester. When it returns a value, lookup stops. When it raises AttributeError, it continues with the next hook.
+Implemented by a hook that wants to intercept attribute lookups on the tester object. The hook can no longer be a simple function but must be an object understanding both ``__call__(tester, func)`` and ``lookup(tester, name)``. It is called when an attribute lookup takes place on the tester. When it returns a value, lookup stops. When it raises AttributeError, it continues with the next hook.
 
 As an example, here is the hook for diffs, implementing both ``__call__`` and ``lookup`` (references to diff and print functions omitted for clarity):
 
@@ -296,7 +302,7 @@ As an example, here is the hook for diffs, implementing both ``__call__`` and ``
   class DiffHook:
 
       def __call__(self, runner, func):
-          return fun
+          return func
 
       def lookup(self, runner, name):
           if name == 'diff':
@@ -317,7 +323,7 @@ The Options API is meant for hooks manipulating options. Options are hierarchica
 
 ``option_get(name, default=None)``
 
-Returns the value for option with given name for this tester or its closest parent.
+Returns the value for the option with given name for this tester or its closest parent.
 
 
 ``option_setdefault(name, default)``
@@ -339,7 +345,7 @@ Enumerates all values for the option with the given name, starting with this tes
 Operators
 ---------
 
-Hook ``operator.py`` introduces the possibility to use various builtin operators instead of the ``assert`` statement. As a last resort, it looks up the methods of the first argument to use as asserting statement. For example:
+Hook ``operator.py`` introduces the possibility to use various builtin operators instead of the ``assert`` statement. As a last resort, it looks up methods of the first argument to use as asserting statement. For example:
 
 .. code:: python
 
@@ -352,19 +358,17 @@ When the given operator returns ``False`` according to ``bool()`` it raises ``As
 
 This shows how autotest stays close to Python as we know it. It does nothing more than looking up the given attribute in four places:
 
-#) module ``operator``,
-   e.g.: ``test.gt(2, 1)``
+#) module ``operator``, e.g.: ``test.gt(2, 1)``
 
-#) module ``builtins``,
-   e.g.: ``test.isinstance('aa', str)``
+#) module ``builtins``, e.g.: ``test.isinstance('aa', str)``
 
-#) module ``inspect``,
-   e.g.: ``test.isfunction(len)``
+#) module ``inspect``, e.g.: ``test.isfunction(len)``
 
-#) the first argument,
-   e.g.: ``test.isupper("ABC)``
+#) the first argument, e.g.: ``test.isupper("ABC")``
 
 The benefits of this is that we do not have to learn new methods, that the assert functions are not limited, and that autotest can print the arguments for us on failure.
+
+**diff**
 
 All operators obtained this way support a keyword ``diff=<function>`` that, when present, is invoked with the actual arguments. The result is then given to the ``AssertionError`` instead of the actual arguments.
 
@@ -380,48 +384,65 @@ The code above will raise ``AssertionError`` with as argument: ``{6, 7, 8, 9}``.
 
 For more general purpose diff functions, see the hook ``diffs.py``.
 
+Operators is included in the default root tester.
+
+
 
 Fixtures
 --------
 
-Hook ``fixtures.py`` introduces fixtures as seen in other test tools. The ``test.fixture`` attribute regsters the next function as a context manager. A fixture is a Python ``contextmanager`` as can be used as such, or it can be specified as a formal argument to a test function. Fixtures accept arguments themselves by using the ':' notation.
-
+Hook ``fixtures.py`` introduces fixtures as seen in other test tools. The ``test.fixture`` attribute registers the next function as a fixture. A fixture is a Python ``contextmanager`` and can be used as such, or it can be specified as a formal argument to a test function. Fixtures accept arguments themselves by using the ':' notation.
 
 .. code:: python
 
-  @test.fixture
-  def answer(a=42):
-    yield a
+   @test.fixture
+   def answer(a=42):
+       yield a
 
-  with test.answer as p:               # as a context manager
-    test.eq(42, p)
+   with test.answer as p:               # as a context manager
+       test.eq(42, p)
 
-  @test
-  def prope_the_universe(answer):      # as a formal argument
-    test.eq(42, answer)
+   @test
+   def prope_the_universe(answer):      # as a formal argument
+       test.eq(42, answer)
 
-  @test
-  def something_wrong(answer:43):      # with argument 43
-    test.ne(42, answer)
-    test.eq(43, answer)
+   @test
+   def something_wrong(answer:43):      # with argument 43
+       test.ne(42, answer)
+       test.eq(43, answer)
 
 
 There are standard fixtures for:
 
-#) stdout
-#) stderr
-#) tmp_path
-#) raises
-#) slow_callback_duration
+#) stdout - captures ``sys.stdout``, including that of subprocesses, in a ``StringIO``,
+#) stderr - captures ``sys.stderr``, including that of subprocesses, in a ``StringIO``,
+#) tmp_path:subpath - creates a temporary ``pathlib.Path`` object, optionally with a subpath,
+#) raises:(Exception, message) - raises AssertionError if given code does not raise given exception with given message
+#) slow_callback_duration - sets the slow_callback_duration on an asyncio event loop.
+
+An example for using ``raises()`` in two different ways:
+
+.. code:: python
+
+   @test
+   def should_raise_error(raises:(AttributeError, "'list' object has no attribute 'a'")):
+       [].a
+
+   with test.raises(AttributeError, "'list' object has no attribute 'a'"):
+       [].a
+
 
 Fixtures can be async (``async def``) but async fixtures can only be used in async tests. The ``slow_callback_duration`` fixture sets the corresponding setting in ``asyncio``, see ``asyncer`` for an explanation.
 
 The option ``timeout=<time in s>`` specifies the maximum amount in seconds a fixture can run. After that an ``TimeoutError`` is raised.
 
+Fixtures is included in the default root tester.
+
+
 Filtering
 ------------
 
-Hook ``filter.py`` support the option ``filter=<str>`` and only executes test whose qualified name includes the given ``<str>``.
+Hook ``filter.py`` supports the option ``filter=<str>`` and only executes test whose *qualified name* includes the given ``<str>``.
 
 .. code:: python
 
@@ -443,27 +464,32 @@ Hook ``diffs.py`` provides the attributes:
 - ``test.diff2(a, b)`` -- an Autotest ``prrint`` + ``difflib`` based diff for ``Plain Old Data`` (POD) objects.
 - ``test.prrint(a)`` -- a pretty printer for POD objects. Use instead of Pythons ``pprint()``.
 
+Diffs is included in the default root tester.
+
 
 Async
 -----
 
-Hook ``asyncer.py`` supports ``asyncio`` tests defined with ``async def``. Async tests can contain other async tests, however due to limitations in Python (being that async is partially a syntax feature and not fully dynamic) this causes nested async tests to be executed in a separate event loop in a separate thread.
+Hook ``asyncer.py`` supports ``asyncio`` tests defined with ``async def``. Async tests can contain other async tests, however due to limitations in Python (being that async is partially a syntax feature and not fully dynamic) this forces nested async tests to be executed in a separate event loop in a separate thread.
 
 The option ``timeout=<time in s>`` specifies the maximum amount in seconds a test can run. After that an ``TimeoutError`` is raised.
 
 The option ``slow_callback_duration=<time in s>`` specifies the time after which ``asyncio`` begins to emit warnings about tests running too long.
 
+Async is included in the default root tester.
+
 
 Wildcards
 ---------
 
-Hook ``wildcard.py`` introduces the attribute ``test.any`` which can be used in structured data comparisons as a wildcard. Its matching can optionally be limited using a function as parameter. It is nice to combine this with the operator hook:
+Hook ``wildcard.py`` introduces the attribute ``test.any`` which can be used in structured data comparisons as a wildcard. Its matching can optionally be limited using a function as argument. It is nice to combine this with the operator hook:
 
 .. code:: python
 
-  test.eq([4, test.any,           8], [4, -3, 42])               # succeeds
-  test.ne([4, test.any(test.pos), 8], [4, -3, 42])               # fails
+  test.eq([4, test.any,           42], [4, -3, 42])               # succeeds
+  test.ne([4, test.any(test.pos), 42], [4, -3, 42])               # fails
 
+Wildcards is included in the default root tester.
 
 
 Levels
@@ -504,13 +530,15 @@ Tests can also be put at a certain level with an option:
            pass
 
 
-**Important** levels only have meaning in parent - child relations. A parent P1 can have a higher level than its children and thus block execution of tests in these children. However *all* tests in P1 itself will run because they have the same level as P1, *by definition*. In fact, tests do not have levels at all, only Testers have levels.
+**Important:** levels only have meaning in parent-child relations. A parent P1 can have a higher level than its children and thus block execution of tests in these children. However *all* tests in P1 itself will run because they have the same level as P1, *by definition*. In fact, tests do not have levels at all, only Testers have levels. It is therefor recommended never to use the root tester directly as that would prevent setting test levels on the root to control running your tests. Always use a child.
+
+Levels is included in the default root tester.
 
 
 Extended closure
 ----------------
 
-The hook ``binder.py`` enables binding to class definition in the making. The namespace of a class being defined is not available inside functions being defined in the class body.
+The hook ``binder.py`` enables binding to a class definition in the making. The namespace of a class being defined is not available inside functions being defined in the class body. See this example:
 
 .. code:: python
 
@@ -518,8 +546,7 @@ The hook ``binder.py`` enables binding to class definition in the making. The na
       a = 42
       def function_b():
           assert a = 43
-      function_b()
-
+      function_b()            # runs fine
   function_a()
 
   class class_a:
@@ -528,7 +555,7 @@ The hook ``binder.py`` enables binding to class definition in the making. The na
           assert a = 43
       function_b()            # NameError: name 'a' is not defined
 
-In order to be able to embed tests in class definitions, the binder hook extends the binding of freevars in test functions to include those of the enclosing class.
+In order to be able to embed tests in class definitions, the binder hook extends the binding of freevars in test functions to include those of the enclosing class. Sorry for the magic.
 
 This hook is enabled by default, but only performs binding when the option ``bind=True`` is present.
 
@@ -541,10 +568,25 @@ This hook is enabled by default, but only performs binding when the option ``bin
           assert a = 43
 
 
-3. Runner main
-==============
+3. Running Tests
+================
 
-..
+**Development**
+
+Running tests during development can be done by just running or importing your module:
+
+.. code:: bash
+
+  $ python <mymodule.py>
+  $ python -c "import mymodule"
+
+When you only want to develop a submodule, just ``cd`` down into that directory and do the same. Only the tests of that submodule (and everything in imports) will be tested.
+
+The methode above just prints crude messages and has no way to use options. For that use the main that comes with autotest:
+
+.. code:: bash
+
+  $ autotest --help
   Usage: autotest [options] module
 
   Options:
@@ -553,6 +595,21 @@ This hook is enabled by default, but only performs binding when the option ``bin
                         only run tests whose qualified name contains FILTER
     -l LEVEL, --level=LEVEL
                         only run tests whose level is >= LEVEL
+
+For example to run your tests but not the imported ones from other packages:
+
+.. code:: bash
+
+  $ autotest --filter mymodule mymodule
+
+
+**Production**
+
+During production, all tests are automatically run during startup when all needed modules are imported. If an the application configures a specific root, for example by calling ``logging.basicConfig()``, the tests will automatically log there. Alternatively, you can setup a separate ``Logger`` for running tests. See Core API.
+
+You can als filter tests or run tests for a specific level only. Or suppress them all. See the source code of ``__main__.py`` for ideas.
+
+
 
 
 4. Misc
@@ -566,4 +623,5 @@ This hook is enabled by default, but only performs binding when the option ``bin
   - in fixtures
   - synchronous code
   - raise same exception
+- use logger.getLogger('autotest') iso getLogger() when no handler is found
 

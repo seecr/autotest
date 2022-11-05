@@ -60,7 +60,7 @@ class Runner: # aka Tester
         elif self._parent:
             self._parent.handle(logrecord)
         else:
-            logging.getLogger().handle(logrecord)
+            logging.getLogger('autotest').handle(logrecord)
 
 
     def fail(self, *args, **kwds):

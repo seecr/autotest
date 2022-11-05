@@ -36,7 +36,7 @@ def code_print_excepthook(t, v, tb):
     return t, v, tb
 
 
-class MyHandler(logging.Handler):
+class LevelNameAdapter(logging.Handler):
     def emit(self, r):
         testlevelname = autotest.levels.levels.get(r.levelno)
         print(f"TEST:{testlevelname}:{r.name}:{r.msg}:{r.pathname}:{r.lineno}")
@@ -67,7 +67,7 @@ if test_options:
 
 
 root = autotest.get_tester()
-root.addHandler(MyHandler())
+root.addHandler(LevelNameAdapter())
 
 
 if len(args) == 1:
