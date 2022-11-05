@@ -624,4 +624,5 @@ You can als filter tests or run tests for a specific level only. Or suppress the
   - synchronous code
   - raise same exception
 - use logger.getLogger('autotest') iso getLogger() when no handler is found
+  this currently interferes with LevelNameAdepter in __main__.py
 
