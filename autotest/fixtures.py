@@ -7,6 +7,8 @@ import contextlib
 import asyncio          # support for async test and fixtures
 import sys
 import os
+import io
+import time
 
 from .utils import asyncio_filtering_exception_handler, ensure_async_generator_func
 from .utils import extend_closure, frame_to_traceback
@@ -17,11 +19,12 @@ __all__ = ['Fixtures', 'testing_fixtures', 'std_fixtures']
 
 
 def get_fixture(runner, name):
-    """ find fixture in hierarchical maps """
+    """ synthetic fixture 'test' """
     if name == 'test':
         def test():
             yield runner
         return test
+    """ find fixture in hierarchical maps """
     for map in runner.option_enumerate('fixtures'):
         if name in map:
             return map[name]
@@ -168,11 +171,6 @@ def stderr():
     yield from _capture('stderr')
 
 
-async def slow_callback_duration(s):
-    asyncio.get_running_loop().slow_callback_duration = s
-    yield
-
-
 def raises(exception=Exception, message=None):
     try:
         yield
@@ -187,7 +185,7 @@ def raises(exception=Exception, message=None):
         raise e
 
 
-std_fixtures = {fx.__name__: fx for fx in [tmp_path, stdout, stderr, slow_callback_duration, raises]}
+std_fixtures = {fx.__name__: fx for fx in [tmp_path, stdout, stderr, raises]}
 
 
 def fixtures_test(self_test):
@@ -553,8 +551,8 @@ def fixtures_test(self_test):
         {}[0]
 
 
-
     @self_test(my_option=56)
     def access_test(test):
         """ implicit fixture test """
         assert test.option_get('my_option') == 56
+

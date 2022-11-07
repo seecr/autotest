@@ -103,9 +103,13 @@ def async_test(self_test):
 
         try:
             sys.stderr = io.StringIO()
+            @atest(keep=True)
+            async def default_slow_callback_duration():
+                assert asyncio.get_running_loop().slow_callback_duration == 0.1
             @atest(slow_callback_duration=0.12)
             async def slow_callback_duration_option():
                 asyncio.get_running_loop().call_soon(time.sleep, 0.11)
+            atest(default_slow_callback_duration)
             s = sys.stderr.getvalue()
             assert "Executing <Handle sleep(0.11) created at" not in s, s
             assert "took 0.110 seconds" not in s, s
@@ -115,4 +119,4 @@ def async_test(self_test):
 
         @atest
         def assert_stats():
-            atest.eq({'found': 10, 'run': 10}, atest.stats)
+            atest.eq({'found': 12, 'run': 12}, atest.stats)

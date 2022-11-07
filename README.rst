@@ -419,7 +419,6 @@ There are standard fixtures for:
 #) stderr - captures ``sys.stderr``, including that of subprocesses, in a ``StringIO``,
 #) tmp_path:subpath - creates a temporary ``pathlib.Path`` object, optionally with a subpath,
 #) raises:(Exception, message) - raises AssertionError if given code does not raise given exception with given message,
-#) slow_callback_duration - sets the slow_callback_duration on an asyncio event loop.
 
 An example for using ``raises()`` in two different ways:
 
@@ -433,7 +432,7 @@ An example for using ``raises()`` in two different ways:
        [].a
 
 
-Fixtures can be async (``async def``) but async fixtures can only be used in async tests. The ``slow_callback_duration`` fixture sets the corresponding setting in ``asyncio``, see ``asyncer`` for an explanation.
+Fixtures can be async (``async def``) but async fixtures can only be used in async tests. Async fixtures are executed in the event loop of the async test they are declared for.
 
 The option ``timeout=<time in s>`` specifies the maximum amount in seconds a fixture can run. After that an ``TimeoutError`` is raised.
 
