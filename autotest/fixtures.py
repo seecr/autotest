@@ -69,7 +69,6 @@ class _Fixtures:
             return self.async_run_with_fixtures(*args, **kwds)
         else:
             with contextlib.ExitStack() as contextmgrstack:
-                # we could use the timeout here too, with a signal handler TODO
                 return self.run_recursively(self.func, contextmgrstack, *args, **kwds)
 
 
@@ -112,21 +111,12 @@ class _Fixtures:
 
     async def async_run_with_fixtures(self, *args, **kwargs):
         AUTOTEST_INTERNAL = 1
-        timeout = self.runner.option_get('timeout')
         async with contextlib.AsyncExitStack() as contextmgrstack:
             result = await self.async_run_recursively(self.func, contextmgrstack, *args, **kwargs)
             assert inspect.iscoroutine(result)
             loop = asyncio.get_running_loop()
             loop.set_exception_handler(asyncio_filtering_exception_handler)
-            done, pending = await asyncio.wait([result], timeout=timeout)
-            for d in done:
-                await d
-            if pending:
-                n = len(pending)
-                p = pending.pop() # one problem at a time
-                s = p.get_stack() # "only one stack frame is returned for a suspended coroutine"
-                tb1 = frame_to_traceback(s[-1])
-                raise asyncio.TimeoutError(f"Hanging task (1 of {n})").with_traceback(tb1)
+            await asyncio.wait_for(result, timeout=None) # timeout via async test
 
 
 fixtures_hook = _Fixtures
