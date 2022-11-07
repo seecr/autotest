@@ -210,7 +210,7 @@ This creates a child and returns a context manager. Afterwards it will log the n
 
 ``addHandler(handler)``
 
-Adds a Python Logger object (from standard module ``logging``) as a handler for output. Child testers will delegate to their parents if they have no handlers themselves. If no handler is present output will be send to the root logger (``logging.getLogger()``). See ``__main__.py`` for an example.
+Adds a Python Logger object (from standard module ``logging``) as a handler for output. Child testers will delegate to their parents if they have no handlers themselves. If no handler is present output will be send to the a general autotest logger (``logging.getLogger('autotest')``). See ``__main__.py`` for an example.
 
 This method is most useful on the root tester, but it can be set anywhere.
 
@@ -509,7 +509,7 @@ integration   30
 performance   20
 =========== =======
 
-The default level is unit. Test levels are provides as attributes on the tester:
+The default level is INTEGRATION. Test levels are provides as attributes on the tester:
 
 .. code:: python
 
@@ -624,6 +624,4 @@ You can als filter tests or run tests for a specific level only. Or suppress the
   - in fixtures,
   - synchronous code,
   - and raise the same exception.
-- use logger.getLogger('autotest') iso getLogger() when no handler is found
-  this currently interferes with LevelNameAdepter in __main__.py
 

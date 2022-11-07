@@ -85,16 +85,20 @@ def async_test(self_test):
         import sys, io, time
         try:
             sys.stderr = io.StringIO()
+            sys.stdout = io.StringIO()
             @atest
             async def debug_warnings_on_by_default():
                 asyncio.get_running_loop().call_soon(time.sleep, 0.11)
-            s = sys.stderr.getvalue()
+            e = sys.stderr.getvalue()
+            s = sys.stdout.getvalue()
             @atest
             def asserts():
-                assert "Executing <Handle sleep(0.11) created at" in s, s
-                assert "took 0.110 seconds" in s, s
+                assert '' == s, s
+                assert "Executing <Handle sleep(0.11) created at" in e, e
+                assert "took 0.110 seconds" in e, e
         finally:
             sys.stderr = sys.__stderr__
+            sys.stdout = sys.__stdout__
 
 
         try:

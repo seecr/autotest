@@ -359,8 +359,8 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         import os
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
         loglines = stdout.getvalue().splitlines()
-        assert 'importing autotest.tests.tryout' in loglines[0]
-        assert "TEST:UNIT:autotest.tests.tryout:one_simple_test:" in loglines[1], loglines
+        assert 'importing autotest.tests.tryout' in loglines[0], loglines
+        assert "TEST:INTEGRATION:autotest.tests.tryout:one_simple_test:" in loglines[1], loglines
         assert "autotest/autotest/tests/tryout.py:6" in loglines[1]
         assert "TEST:INTEGRATION:autotest.tests.tryout:one_more_test:" in loglines[2]
         assert "autotest/autotest/tests/tryout.py:10" in loglines[2]
@@ -402,10 +402,10 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         self_test2.eq('', e)
         o = stdout.getvalue()
         self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
+        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_simple_test")
         self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
         self_test2.contains(o, "TEST:PERFORMANCE:autotest.tests.tryout2:one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 3:")
+        self_test2.contains(o, "TEST:INTEGRATION:root:stats:found: 3, run: 3:")
 
 
     @self_test2
@@ -415,10 +415,10 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         self_test2.eq('', e)
         o = stdout.getvalue()
         self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
+        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_simple_test")
         self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
         self_test2.contains(o, "TEST:PERFORMANCE:autotest.tests.tryout2:one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 3:")
+        self_test2.contains(o, "TEST:INTEGRATION:root:stats:found: 3, run: 3:")
 
     @self_test2
     def main_with_filter(stdout, stderr):

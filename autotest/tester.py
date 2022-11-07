@@ -16,6 +16,9 @@ import contextlib       # child as context
 import collections      # chain maps for hierarchical Tester and Counter
 import logging          # output to logger
 
+logger = logging.getLogger('autotest')
+logger.isEnabledFor(50)
+
 
 defaults = dict(
     keep      = False,           # Ditch test functions after running
@@ -60,7 +63,7 @@ class Tester:
         elif self._parent:
             self._parent.handle(logrecord)
         else:
-            logging.getLogger().handle(logrecord)
+            logger.handle(logrecord)
 
 
     def fail(self, *args, **kwds):
@@ -107,7 +110,7 @@ class Tester:
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
             self._name or 'root',                     # name of logger
-            getattr(self, 'level'),                   # log level, bit intimate with levels_hook ;-(
+            getattr(self, 'level', logging.WARNING),  # log level, bit intimate with levels_hook ;-(
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -306,12 +309,16 @@ def logging_runner(name):
 @contextlib.contextmanager
 def intercept():
     records = []
+    class intercept:
+        level = 30
+        handle = records.append
+
     root_logger = logging.getLogger()
-    root_logger.addFilter(records.append) # intercept only
+    root_logger.addHandler(intercept)
     try:
         yield records
     finally:
-        root_logger.removeFilter(records.append)
+        root_logger.removeHandler(intercept)
 
 
 class logging_handlers:
@@ -325,7 +332,7 @@ class logging_handlers:
             assert 1 == 1  # hooks for operators not present
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler.<locals>.a_test"
-        self_test.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
+        self_test.eq(log_msg, f"carl-30-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
 
 
     @self_test
@@ -340,7 +347,7 @@ class logging_handlers:
         log_msg = s.getvalue()
         self_test.startswith(log_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_propagates.<locals>.my_sub_test"
-        self_test.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq(log_msg, f"main.sub1-30-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
 
 
     @self_test
@@ -357,7 +364,7 @@ class logging_handlers:
         sub_msg = sub_s.getvalue()
         self_test.startswith(sub_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_does_not_propagate.<locals>.my_sub_test"
-        self_test.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq(sub_msg, f"main.sub1-30-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
         self_test.eq('', main_msg) # do not duplicate message in parent
 
 
@@ -365,6 +372,7 @@ class logging_handlers:
     def tester_delegates_to_root_logger():
         with intercept() as i:
             tester = Tester('free')
+            tester.level = 30 # no level hook yet, so we provide level this way
             @tester
             def my_output_goes_to_root_logger():
                 assert 1 == 1 # hooks for operators not present
@@ -383,7 +391,7 @@ class logging_handlers:
             pass
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
-        self_test.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
+        self_test.eq(log_msg, f"esmee-30-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
 
 
     @self_test
@@ -397,6 +405,7 @@ class logging_handlers:
             tst.eq(3, len(i))
             msg = i[2].msg
             tst.contains(msg, "found: 2, run: 2")
+
 
     @self_test
     def run_or_not():

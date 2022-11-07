@@ -54,7 +54,7 @@ class _Levels:
 
     def lookup(self, tester, name):
         if name == 'level':                        # Tester asks for 'level'; we're a bit intimate
-            o = tester.option_get(name, 40)
+            o = tester.option_get(name, logging.WARNING)
             return numeric_level(o)
         if level := levels.get(name.upper()):
             return tester(level=level)
