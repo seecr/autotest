@@ -5,18 +5,21 @@ Autotest
 1. Introduction
 ===============
 
-A Simpler Test Tool for Python
-------------------------------
+A Simpler Pythonic Test Tool
+----------------------------
 
-Autotest is a simple and extensible test tool for Python. The most prominent differences in how autotest works are:
+Autotest is a simple and extensible test tool for Python. The key differences are:
 
 - tests are *ordinary functions* and are part of the application code,
 - gathering tests is *automatic* and follows the structure of your code,
-- testing *stops on the first failure* with a standard Python stack trace,
-- in *production you also run the tests*, at least at startup,
-- all things *async fully supported*.
+- testing *stops on first failure* with a standard Python stack trace,
+- *production also runs tests*, at least at startup,
+- it relies on well-known *standard/builtin* modules,
+- *asyncio* fully supported.
 
-The most prominent feature is that it automatically tests everything your code *actually* uses. This is particularly useful when you develop multiple projects in conjunction as you cannot forget to rerun tests for the one while you work on the other.
+**Test Dependencies**
+
+The most prominent feature is that it automatically tests everything your code *actually* depends on, across modules, packages and projects. This results in running less tests when working on a submodule and, when developing projects in conjunction, you need not run all their test suites after a change (and forget one).
 
 History
 -------
@@ -24,14 +27,14 @@ Autotest began, as a recalcitrant move away from the frameworks, with the follow
 
 .. code:: python
 
-  def test(f):
+  def test(f):                            # the test decorator
       print(f.__qualname__)
       f()
 
   def i_need_testing(x):
       return x
 
-  @test
+  @test                                   # marks and runs the test
   def a_test():
       assert 42 == i_need_testing(42)
 
@@ -617,9 +620,5 @@ You can als filter tests or run tests for a specific level only. Or suppress the
 
 **TODO**
 
-- unify the use of timeouts:
-  - in asyncer,
-  - in fixtures,
-  - synchronous code,
-  - and raise the same exception.
+- also implement timeout for synchrounous code
 
