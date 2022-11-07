@@ -617,7 +617,6 @@ You can als filter tests or run tests for a specific level only. Or suppress the
 
 **TODO**
 
-- unify the setting of slow_callback_duration for the hooks asyncer and fixtures (the first uses an option, the second uses a fixture)
 - unify the use of timeouts:
   - in asyncer,
   - in fixtures,
