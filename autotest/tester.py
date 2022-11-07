@@ -1,19 +1,19 @@
 
-""" Defines the Runner
+""" Defines the Tester
 
-    NB: a stand alone Runner (self_test) is created as to not interfere with
+    NB: a stand alone Tester (self_test) is created as to not interfere with
         the system wide default runner, which may not exists as long as we
         are bootstrapping.
 
-    NB: Runner is tested using Runner itself. Runner is bootstrapped in steps,i
-        starting with a simple Runner of which the capabilities are gradually
+    NB: Tester is tested using Tester itself. Tester is bootstrapped in steps,i
+        starting with a simple Tester of which the capabilities are gradually
         extended.
 
 """
 
 import inspect          # for recognizing functions, generators etc
 import contextlib       # child as context
-import collections      # chain maps for hierarchical Runners and Counter
+import collections      # chain maps for hierarchical Tester and Counter
 import logging          # output to logger
 
 
@@ -23,7 +23,7 @@ defaults = dict(
 )
 
 
-class Runner: # aka Tester
+class Tester:
     """ Main tool for running tests across modules and programs. """
 
     def __call__(self, *functions, **options):
@@ -39,7 +39,7 @@ class Runner: # aka Tester
 
 
     def getChild(self, *_, **__):
-        return Runner(*_, parent=self, **__)
+        return Tester(*_, parent=self, **__)
 
 
     @contextlib.contextmanager
@@ -146,7 +146,7 @@ class Runner: # aka Tester
                 pass
 
     def __str__(self):
-        return f"<Runner {self._name!r}>"
+        return f"<Tester {self._name!r}>"
 
 
 
@@ -165,7 +165,7 @@ from .levels import levels_hook
 from sys import argv
 if 'autotest.selftest' in argv:
     argv.remove('autotest.selftest')
-    self_test = Runner('autotest-self-tests',
+    self_test = Tester('autotest-self-tests',
         hooks=(operators_hook, levels_hook)) # separate runner for bootstrapping/self testing
 else:
     class Ignore:
@@ -175,7 +175,7 @@ else:
             def noop(*_, **__):
                 pass
             return noop
-    self_test = Runner(hooks=[Ignore()])
+    self_test = Tester(hooks=[Ignore()])
     self_test.addHandler(logging.NullHandler())
 
 
@@ -298,7 +298,7 @@ def stringio_handler():
 
 def logging_runner(name):
     s, myhandler = stringio_handler()
-    tester = Runner(name, hooks=[levels_hook])
+    tester = Tester(name, hooks=[levels_hook])
     tester.addHandler(myhandler)
     return tester, s
 
@@ -364,7 +364,7 @@ class logging_handlers:
     @self_test
     def tester_delegates_to_root_logger():
         with intercept() as i:
-            tester = Runner('free')
+            tester = Tester('free')
             @tester
             def my_output_goes_to_root_logger():
                 assert 1 == 1 # hooks for operators not present

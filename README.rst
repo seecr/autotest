@@ -157,7 +157,7 @@ A decorator for marking functions as tests:
    def function_marked_as_test():
        pass
 
-This runs the given function as a test and returns ``None``. Thus, ``function_marked_as_test()`` becomes ``None`` and the function is garbage collected subsequently. Keeping the test is possible with an option.
+This runs the given function and returns ``None``. Thus, ``function_marked_as_test`` becomes ``None`` and the function is garbage collected subsequently. Keeping the test is possible with an option.
 
 
 ``__call__(**options)``
@@ -170,7 +170,10 @@ A way for setting options:
    def function_marked_as_test():
        pass
 
-This creates an *anonymous child* tester with given options.  If you get creative, you could also run:
+**Important**: This creates an *anonymous child* tester with given options. This tester is only used once and then discarded. There is a fixtures that gives tests access to it, see ``Fixtures`` below.
+
+
+If you get creative, you could also run:
 
 .. code:: python
 
@@ -201,7 +204,7 @@ This creates a child and returns a context manager. Afterwards it will log the n
    test = autotest.get_tester(__name__)
    with test.child(level=CRITICAL) as crit:
        @crit
-       def function_not_marked():
+       def a_critical_test_function():
            pass
 
 
@@ -227,10 +230,10 @@ Core Options
 
 The core knows three options. Hooks may support additional options. Options can be given to any of these calls:
 
-- ``basic_config(**options)``
-- ``__call__(**options)``
-- ``getChild(**options)``
-- ``child(**options)``
+- ``basic_config(**options)``,
+- ``__call__(**options)``,
+- ``getChild(**options)``,
+- ``child(**options)``.
 
 
 Child testers inherit options from their parents and can override them.
@@ -251,7 +254,7 @@ Normally, autotest runs a test as soon as it discovers it and then discards it. 
   def this_test_runs_immediately():
     pass
 
-  assert my_test is None
+  assert this_test_runs_immediately is None
 
   @test(keep=True, run=False)
   def another_test_for_running_later():
@@ -358,13 +361,10 @@ When the given operator returns ``False`` according to ``bool()`` it raises ``As
 
 This shows how autotest stays close to Python as we know it. It does nothing more than looking up the given attribute in four places:
 
-#) module ``operator``, e.g.: ``test.gt(2, 1)``
-
-#) module ``builtins``, e.g.: ``test.isinstance('aa', str)``
-
-#) module ``inspect``, e.g.: ``test.isfunction(len)``
-
-#) the first argument, e.g.: ``test.isupper("ABC")``
+#) module ``operator``, e.g.: ``test.gt(2, 1)``,
+#) module ``builtins``, e.g.: ``test.isinstance('aa', str)``,
+#) module ``inspect``, e.g.: ``test.isfunction(len)``,
+#) the first argument, e.g.: ``test.isupper("ABC")``.
 
 The benefits of this is that we do not have to learn new methods, that the assert functions are not limited, and that autotest can print the arguments for us on failure.
 
@@ -403,7 +403,7 @@ Hook ``fixtures.py`` introduces fixtures as seen in other test tools. The ``test
        test.eq(42, p)
 
    @test
-   def prope_the_universe(answer):      # as a formal argument
+   def probe_the_universe(answer):      # as a formal argument
        test.eq(42, answer)
 
    @test
@@ -414,10 +414,11 @@ Hook ``fixtures.py`` introduces fixtures as seen in other test tools. The ``test
 
 There are standard fixtures for:
 
+#) test - gives access to the current tester, useful for anonymous subtesters,
 #) stdout - captures ``sys.stdout``, including that of subprocesses, in a ``StringIO``,
 #) stderr - captures ``sys.stderr``, including that of subprocesses, in a ``StringIO``,
 #) tmp_path:subpath - creates a temporary ``pathlib.Path`` object, optionally with a subpath,
-#) raises:(Exception, message) - raises AssertionError if given code does not raise given exception with given message
+#) raises:(Exception, message) - raises AssertionError if given code does not raise given exception with given message,
 #) slow_callback_duration - sets the slow_callback_duration on an asyncio event loop.
 
 An example for using ``raises()`` in two different ways:
@@ -460,8 +461,8 @@ Diffs
 
 Hook ``diffs.py`` provides the attributes:
 
-- ``test.diff(a b)`` -- a Python ``pprint`` + ``difflib`` based general purpose diff for use with the operator hook.
-- ``test.diff2(a, b)`` -- an Autotest ``prrint`` + ``difflib`` based diff for ``Plain Old Data`` (POD) objects.
+- ``test.diff(a b)`` -- a Python ``pprint`` + ``difflib`` based general purpose diff for use with the operator hook,
+- ``test.diff2(a, b)`` -- an Autotest ``prrint`` + ``difflib`` based diff for ``Plain Old Data`` (POD) objects,
 - ``test.prrint(a)`` -- a pretty printer for POD objects. Use instead of Pythons ``pprint()``.
 
 Diffs is included in the default root tester.
@@ -619,10 +620,10 @@ You can als filter tests or run tests for a specific level only. Or suppress the
 
 - unify the setting of slow_callback_duration for the hooks asyncer and fixtures (the first uses an option, the second uses a fixture)
 - unify the use of timeouts:
-  - in asyncer
-  - in fixtures
-  - synchronous code
-  - raise same exception
+  - in asyncer,
+  - in fixtures,
+  - synchronous code,
+  - and raise the same exception.
 - use logger.getLogger('autotest') iso getLogger() when no handler is found
   this currently interferes with LevelNameAdepter in __main__.py
 

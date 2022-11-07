@@ -25,13 +25,13 @@
 """
     The structure of autotests for bootstrapping.
     ---------------------------------------------
-    * tester.py contains the main Runner without any hooks, this module tests itself using a
-      separate Runner called self_test. We reuse self_test to incrementally run the tests for
+    * tester.py contains the main Tester without any hooks, this module tests itself using a
+      separate Tester called self_test. We reuse self_test to incrementally run the tests for
       the hooks.
     * self_test contains one hook: operator, in order to make testing easier. However, a
-      small mistake in operator might cause all tests to fail since Runner and operator
+      small mistake in operator might cause all tests to fail since Tester and operator
       mutually depend on each other.
-    * After all hooks have been tested, we assemble the final root Runner and tests if
+    * After all hooks have been tested, we assemble the final root Tester and tests if
       all hooks work properly.
     * Run tests for autotest itself by:
        $ python -c "import autotest" autotest.selftest
@@ -44,7 +44,7 @@
 import os
 
 
-from .tester import Runner, self_test
+from .tester import Tester, self_test
 @self_test
 def assert_stats():
     assert {'found': 23, 'run': 22} == self_test.stats, self_test.stats
@@ -85,7 +85,7 @@ def check_stats():
 
 
 def assemble_root_runner(**options):
-    return Runner(
+    return Tester(
         # order of hook matters, processed from right to left
         hooks = [
             operators_hook,
@@ -231,7 +231,7 @@ testers = {} # final
 @self_test
 def get_root_tester():
     root = get_tester()
-    assert isinstance(root, Runner)
+    assert isinstance(root, Tester)
     root1 = get_tester()
     assert root1 is root
 
