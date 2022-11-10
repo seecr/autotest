@@ -123,8 +123,7 @@ class Tester:
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
             self._name or 'root',                     # name of logger
-            self.level,
-            #getattr(self, 'level', logging.WARNING),  # log level, bit intimate with levels_hook ;-(
+            self.level,                               # log level, bit intimate with levels_hook ;-(
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -153,7 +152,8 @@ class Tester:
 
 
     def log_stats(self):
-        self.handle(self._create_logrecord(self.log_stats, 'stats:' + ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
+        name = self._name + '.stats: ' if self._name else 'stats: '
+        self.handle(self._create_logrecord(None, name + ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
 
 
     def __getattr__(self, name):

@@ -241,13 +241,14 @@ The core knows three options. Hooks may support additional options. Options can 
 
 Child testers inherit options from their parents and can override them.
 
-======  =======  =======   ==========================================================
-option  type     default   Explanation
-======  =======  =======   ==========================================================
-keep    boolean  False     Keep the function instead of discarding it.
-run     boolean  True      Run immediately.
-hooks   list     []        List of hooks that are invoked in order.
-======  =======  =======   ==========================================================
+==========  =======  =======   ==========================================================
+option      type     default   Explanation
+==========  =======  =======   ==========================================================
+keep        boolean  False     Keep the function instead of discarding it.
+run         boolean  True      Run immediately.
+hooks       list     []        List of hooks that are invoked in order.
+subprocess  boolean  False     Runs test when inside a subprocess.
+==========  =======  =======   ==========================================================
 
 Normally, autotest runs a test as soon as it discovers it and then discards it. The example below show how tests can be run later by keeping and invoking them.
 
@@ -265,6 +266,8 @@ Normally, autotest runs a test as soon as it discovers it and then discards it. 
 
   another_test_for_running_later()
 
+
+Tests do not run in subprocesses which are spawned because the spawn method reimports all needed modules causing all tests to run again and in an endless loop. This only happens when a test spawns of course, but is is disabled by default because these tests run in practically the same context, which add little value.
 
 
 Hooks API
@@ -498,7 +501,12 @@ Wildcards is included in the default root tester.
 Levels
 ------
 
-Hook ``levels.py`` introduces test levels such as ``unit``, ``integration`` etc. It is meant to run only certain tests depending on the context. During development for example, for reasons of speed, integration and performance tests can be skipped. The levels are just numbers and a number functions as a threshold, much like as in Pythons ``logging``.
+Hook ``levels.py`` introduces test levels such as ``unit``, ``integration``
+etcetera, together with two options, ``level`` and ``threshold``, to control
+it. It is meant to run only certain tests depending on the context. During
+development for example, for reasons of speed, integration and performance
+tests can be skipped. The levels are just numbers and a number functions as a
+level/threshold, much like as in Pythons ``logging``.
 
 The levels are:
 
@@ -511,13 +519,14 @@ integration   30
 performance   20
 =========== =======
 
-The default level is INTEGRATION. Test levels are provides as attributes on the tester:
+The default level is ``unit``. Test levels are provides as attributes on the tester:
 
 .. code:: python
 
   @test.critical
   def a_critical_test():
       pass
+
 
 Tests can also be put at a certain level with an option:
 
@@ -533,7 +542,9 @@ Tests can also be put at a certain level with an option:
            pass
 
 
-**Important:** levels only have meaning in parent-child relations. A parent P1 can have a higher level than its children and thus block execution of tests in these children. However *all* tests in P1 itself will run because they have the same level as P1, *by definition*. In fact, tests do not have levels at all, only Testers have levels. It is therefor recommended never to use the root tester directly as that would prevent setting test levels on the root to control running your tests. Always use a child.
+The default ``threshold`` is ``integration``.
+
+A parent can have the ``threshold`` option set to one of the levels. This will block execution of tests in these children of levels lower than ``threshold``. Note that tests do not have levels, only Testers have. **NB:** the highest ``threshold`` in chain of parent-children determines the tests to run. This means a child tester can run integration tests (threshold='integration'), but the root tester can overrule this to run only unit tests.
 
 Levels is included in the default root tester.
 
@@ -596,8 +607,8 @@ The methode above just prints crude messages and has no way to use options. For 
     -h, --help            show this help message and exit
     -f FILTER, --filter=FILTER
                         only run tests whose qualified name contains FILTER
-    -l LEVEL, --level=LEVEL
-                        only run tests whose level is >= LEVEL
+    -t , --threshold=THRESHOLD
+                        only run tests whose level is >= THRESHOLD
 
 For example to run your tests but not the imported ones from other packages:
 

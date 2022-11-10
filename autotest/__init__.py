@@ -384,7 +384,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         assert "autotest/tests/tryout.py" in lines[-3]
         assert "assert 1 == 2" in lines[-2]
         assert "AssertionError: one is not two" in lines[-1], lines[-1]
-        assert 20 == len(lines), len(lines)
+        assert 27 == len(lines), '\n'.join(repr(l) for l in lines)
 
 
     #@self_test2
@@ -406,7 +406,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
         self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
         self_test2.comp.contains(o, "one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 2:")
+        self_test2.contains(o, "TEST:UNIT:root:stats: found: 3, run: 2:")
 
 
     @self_test2
@@ -419,7 +419,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
         self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
         self_test2.comp.contains(o, "one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 2:")
+        self_test2.contains(o, "TEST:UNIT:root:stats: found: 3, run: 2:")
 
     @self_test2
     def main_with_filter(stdout, stderr):

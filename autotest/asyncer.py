@@ -25,44 +25,61 @@ def async_hook(runner, func):
                     await asyncio.wait_for(asyncio.shield(coro_or_result), runner.option_get('timeout', 1))
                 except asyncio.TimeoutError as e:
                     raise TimeoutError(func.__name__) from None
-            thread(
-                asyncio.run,
-                with_options(),
-                debug=runner.option_get('debug', True)
-                ).result()
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError as e:
+                asyncio.run(with_options(), debug=runner.option_get('debug', True))
+            else:
+                thread(
+                    asyncio.run,
+                    with_options(),
+                    debug=runner.option_get('debug', True)
+                    ).result()
         else:
             return coro_or_result
     return may_be_async
 
 
 def async_test(self_test):
+    import threading
+    main = threading.current_thread()
     with self_test.child(hooks=(async_hook,)) as atest:
 
         atest.eq({'found': 0, 'run': 0}, atest.stats)
-        trace = [None, None, None, None]
+        loops = [None, None, None, None]
+        threads = [None, None, None, None]
 
         @atest
         async def an_async_test():
-            trace[0] = asyncio.get_running_loop()
+            loops[0] = asyncio.get_running_loop()
+            threads[0] = threading.current_thread()
 
         @atest
         async def parent():
-            trace[1] = asyncio.get_running_loop()
+            loops[1] = asyncio.get_running_loop()
+            threads[1] = threading.current_thread()
             @atest
             async def nested_async_test():
-                trace[2] = asyncio.get_running_loop()
+                loops[2] = asyncio.get_running_loop()
+                threads[2] = threading.current_thread()
             @atest
             def nested_sync_test():
-                trace[3] = asyncio.get_running_loop()
+                loops[3] = asyncio.get_running_loop()
+                threads[3] = threading.current_thread()
 
-            assert len(trace) ==  4
-            assert trace[0]
-            assert trace[1]
-            assert trace[1] != trace[0]
-            assert trace[2]
-            assert trace[2] != trace[0] # each async test has own loop
-            assert trace[2] != trace[1]
-            assert trace[3] == trace[1] # still same loop
+            assert threads[0] == main
+            assert threads[1] == main
+            assert threads[2] != main
+            assert threads[3] == main
+            assert len(loops) ==  4
+            assert loops[0]
+            assert loops[1]
+            assert loops[1] != loops[0]
+            assert loops[2]
+            assert loops[2] != loops[0] # each async test has own loop
+            assert loops[2] != loops[1]
+            assert loops[3] == loops[1] # still same loop
+
 
         try:
             @atest
