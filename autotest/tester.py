@@ -9,20 +9,33 @@
         starting with a simple Tester of which the capabilities are gradually
         extended.
 
+    TODO nav gebruik in metastreams-server:
+    2. Make async tests reuse event loop if available
+
 """
 
 import inspect          # for recognizing functions, generators etc
 import contextlib       # child as context
 import collections      # chain maps for hierarchical Tester and Counter
 import logging          # output to logger
+import os               # controlling env
+
 
 logger = logging.getLogger('autotest')
-logger.isEnabledFor(50)
+
+
+""" by default, tests are suppressed in subprocesses because many tests run
+    during import, which can easily lead to an endless loop.
+    Use subprocess=True when needed.
+"""
+is_subprocess = 'AUTOTEST_PARENT' in os.environ
+os.environ['AUTOTEST_PARENT'] = 'Y'
 
 
 defaults = dict(
-    keep      = False,           # Ditch test functions after running
-    run       = True,            # Run test immediately
+    keep       = False,           # Ditch test functions after running
+    run        = True,            # Run test immediately
+    subprocess = False            # Do not run test when in a subprocess
 )
 
 
@@ -97,7 +110,7 @@ class Tester:
             value = m.get(name)
             if isinstance(value, (list, tuple)):
                 yield from reversed(value)
-            elif value:
+            elif value is not None:
                 yield value
 
 
@@ -110,7 +123,8 @@ class Tester:
     def _create_logrecord(self, f, msg):
         return logging.LogRecord(
             self._name or 'root',                     # name of logger
-            getattr(self, 'level', logging.WARNING),  # log level, bit intimate with levels_hook ;-(
+            self.level,
+            #getattr(self, 'level', logging.WARNING),  # log level, bit intimate with levels_hook ;-(
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -126,14 +140,15 @@ class Tester:
         AUTOTEST_INTERNAL = 1
         self._stat('found')
         orig_test_func = test_func
-        for hook in self.option_enumerate('hooks'):
-            if not (test_func := hook(self, test_func)):
-                break
-        else:
-            if self.option_get('run'):
-                self._stat('run')
-                self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
-                test_func(*app_args, **app_kwds)
+        if not is_subprocess or self.option_get('subprocess', False):
+            for hook in self.option_enumerate('hooks'):
+                if not (test_func := hook(self, test_func)):
+                    break
+            else:
+                if self.option_get('run'):
+                    self._stat('run')
+                    self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
+                    test_func(*app_args, **app_kwds)
         return orig_test_func if self.option_get('keep') else None
 
 
@@ -169,15 +184,11 @@ from sys import argv
 if 'autotest.selftest' in argv:
     argv.remove('autotest.selftest')
     self_test = Tester('autotest-self-tests',
-        hooks=(operators_hook, levels_hook)) # separate runner for bootstrapping/self testing
+        hooks=(operators_hook, levels_hook), level='unit') # separate runner for bootstrapping/self testing
 else:
     class Ignore:
-        def __call__(self, runner, func):
-            pass
-        def lookup(self, runner, name):
-            def noop(*_, **__):
-                pass
-            return noop
+        def __call__(self, runner, func): pass
+        def lookup(self, runner, name): return self
     self_test = Tester(hooks=[Ignore()])
     self_test.addHandler(logging.NullHandler())
 
@@ -310,7 +321,7 @@ def logging_runner(name):
 def intercept():
     records = []
     class intercept:
-        level = 30
+        level = 40
         handle = records.append
 
     root_logger = logging.getLogger()
@@ -332,7 +343,7 @@ class logging_handlers:
             assert 1 == 1  # hooks for operators not present
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler.<locals>.a_test"
-        self_test.eq(log_msg, f"carl-30-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
+        self_test.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
 
 
     @self_test
@@ -347,7 +358,7 @@ class logging_handlers:
         log_msg = s.getvalue()
         self_test.startswith(log_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_propagates.<locals>.my_sub_test"
-        self_test.eq(log_msg, f"main.sub1-30-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
 
 
     @self_test
@@ -364,7 +375,7 @@ class logging_handlers:
         sub_msg = sub_s.getvalue()
         self_test.startswith(sub_msg, f"main.sub1-")
         qname = "logging_handlers.sub_tester_does_not_propagate.<locals>.my_sub_test"
-        self_test.eq(sub_msg, f"main.sub1-30-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
+        self_test.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
         self_test.eq('', main_msg) # do not duplicate message in parent
 
 
@@ -372,7 +383,7 @@ class logging_handlers:
     def tester_delegates_to_root_logger():
         with intercept() as i:
             tester = Tester('free')
-            tester.level = 30 # no level hook yet, so we provide level this way
+            tester.level = 40 # no level hook yet, so we provide level this way
             @tester
             def my_output_goes_to_root_logger():
                 assert 1 == 1 # hooks for operators not present
@@ -391,7 +402,7 @@ class logging_handlers:
             pass
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
-        self_test.eq(log_msg, f"esmee-30-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
+        self_test.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
 
 
     @self_test
@@ -412,3 +423,5 @@ class logging_handlers:
         @self_test(run=False)
         def not_run():
             assert "do not" == "run me"
+
+

@@ -81,7 +81,7 @@ diff_test(self_test)
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 112, 'run': 100}, self_test.stats)
+    self_test.eq({'found': 150, 'run': 124}, self_test.stats)
 
 
 def assemble_root_runner(**options):
@@ -147,7 +147,9 @@ def root_tester_assembly_test(test):
 
     # levels hook
     from .levels import UNIT
-    with test.child(level=UNIT) as tst:
+    assert test.level == 40, test.level
+    assert test.threshold == 30, test.threshold
+    with test.child(threshold=UNIT) as tst:
         @tst.performance
         def performance_test():
             assert "not" == "executed"
@@ -201,7 +203,8 @@ testers = {} # initial, for more testing
 
 
 def basic_config(**options):
-    assert None not in testers
+    #raise Exception
+    assert None not in testers, testers
     testers[None] = assemble_root_runner(**options)
 
 
@@ -221,11 +224,8 @@ def get_tester(name=None):
 def set_root_opts():
     basic_config(filter='aap')
     root = get_tester()
-    self_test.eq({'filter', 'fixtures', 'hooks', 'keep', 'run'}, set(root._options.keys()))
+    self_test.eq({'filter', 'fixtures', 'hooks', 'keep', 'run', 'subprocess'}, set(root._options.keys()))
     self_test.eq('aap', root._options['filter'])
-
-
-testers = {} # final
 
 
 @self_test
@@ -249,12 +249,17 @@ def get_sub_tester():
     assert mymodule1 is mymodule
 
 
+testers.clear()
+
+
 @self_test
 def run_integration_tests():
     root_tester_assembly_test(assemble_root_runner())
     from .integrationtests import integration_test
-    integration_test(assemble_root_runner().integration)
+    integration_test(assemble_root_runner())
 
+
+testers.clear()
 
 
 @self_test
@@ -328,11 +333,7 @@ We put these last, as printing any debug/trace messages anywhere in th code caus
 to fail.
 """
 
-
-if 'AUTOTESTSELFTEST' not in os.environ:
-    os.putenv('AUTOTESTSELFTEST', 'ACTIVE')
-
-    self_test2 = self_test.getChild(hooks=[fixtures_hook], fixtures=std_fixtures)
+with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2:
 
 
     @self_test2
@@ -349,8 +350,8 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         assert "-h, --help            show this help message and exit" in s
         assert "-f FILTER, --filter=FILTER" in s
         assert "only run tests whose qualified name contains FILTER" in s
-        assert "-l LEVEL, --level=LEVEL" in s
-        assert "only run tests whose level is >= LEVEL" in s
+        assert "-t THRESHOLD, --threshold=THRESHOLD" in s
+        assert "only run tests whose level is >= THRESHOLD" in s
 
 
 
@@ -360,9 +361,9 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
         loglines = stdout.getvalue().splitlines()
         assert 'importing autotest.tests.tryout' in loglines[0], loglines
-        assert "TEST:INTEGRATION:autotest.tests.tryout:one_simple_test:" in loglines[1], loglines
+        assert "TEST:UNIT:autotest.tests.tryout:one_simple_test:" in loglines[1], loglines
         assert "autotest/autotest/tests/tryout.py:6" in loglines[1]
-        assert "TEST:INTEGRATION:autotest.tests.tryout:one_more_test:" in loglines[2]
+        assert "TEST:INTEGRATION:autotest.tests.tryout:one_more_test:" in loglines[2], loglines[2]
         assert "autotest/autotest/tests/tryout.py:10" in loglines[2]
         assert len(loglines) == 3
         lines = stderr.getvalue().splitlines()
@@ -386,13 +387,13 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         assert 20 == len(lines), len(lines)
 
 
-    @self_test2
+    #@self_test2
     def main_with_selftests(stdout, stderr):
         os.system("PYTHONPATH=. python autotest autotest.selftest")
         lns = stdout.getvalue().splitlines()
         assert ['Usage: autotest [options] module', ''] == lns, lns
         lns = stderr.getvalue().splitlines()
-        assert len(lns) == 142, len(lns) # number of logged tests, sort of
+        assert len(lns) == 144, len(lns) # number of logged tests, sort of
 
 
     @self_test2
@@ -402,10 +403,10 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         self_test2.eq('', e)
         o = stdout.getvalue()
         self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_simple_test")
+        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
         self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
-        self_test2.contains(o, "TEST:PERFORMANCE:autotest.tests.tryout2:one_performance_test")
-        self_test2.contains(o, "TEST:INTEGRATION:root:stats:found: 3, run: 3:")
+        self_test2.comp.contains(o, "one_performance_test")
+        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 2:")
 
 
     @self_test2
@@ -415,10 +416,10 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         self_test2.eq('', e)
         o = stdout.getvalue()
         self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_simple_test")
+        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
         self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
-        self_test2.contains(o, "TEST:PERFORMANCE:autotest.tests.tryout2:one_performance_test")
-        self_test2.contains(o, "TEST:INTEGRATION:root:stats:found: 3, run: 3:")
+        self_test2.comp.contains(o, "one_performance_test")
+        self_test2.contains(o, "TEST:UNIT:root:stats:found: 3, run: 2:")
 
     @self_test2
     def main_with_filter(stdout, stderr):
@@ -433,7 +434,7 @@ if 'AUTOTESTSELFTEST' not in os.environ:
 
     @self_test2
     def main_with_level_unit(stdout, stderr):
-        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --level unit")
+        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold unit")
         e = stderr.getvalue()
         assert '' == e, e
         o = stdout.getvalue()
@@ -444,7 +445,7 @@ if 'AUTOTESTSELFTEST' not in os.environ:
 
     @self_test2
     def main_with_level_integration(stdout, stderr):
-        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --level integration")
+        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold integration")
         e = stderr.getvalue()
         assert '' == e, e
         o = stdout.getvalue()
@@ -452,3 +453,4 @@ if 'AUTOTESTSELFTEST' not in os.environ:
         assert 'one_integration_test' in o, o
         assert 'one_performance_test' not in o
         assert 'found: 3, run: 2' in o, o
+

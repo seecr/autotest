@@ -38,6 +38,9 @@ levels = {
     NOTSET:         'NOTSET',
 }
 
+DEFAULT_LEVEL = UNIT
+DEFAULT_THRESHOLD = INTEGRATION
+
 
 def numeric_level(l):
     return levels[l.upper()] if isinstance(l, str) else l
@@ -46,17 +49,15 @@ def numeric_level(l):
 class _Levels:
 
     def __call__(self, tester, func):
-        lvls = [numeric_level(l) for l in tester.option_enumerate('level')] or [0]
-        threshold = max(lvls)
-        mylevel = lvls[0]
-        if mylevel >= threshold:
+        if tester.level >= tester.threshold:
             return func
 
     def lookup(self, tester, name):
-        if name == 'level':                        # Tester asks for 'level'; we're a bit intimate
-            o = tester.option_get(name, logging.WARNING)
-            return numeric_level(o)
-        if level := levels.get(name.upper()):
+        if name == 'level':
+            return numeric_level(tester.option_get(name, DEFAULT_LEVEL))
+        if name == 'threshold':
+            return max((numeric_level(l) for l in tester.option_enumerate('threshold')), default=DEFAULT_THRESHOLD)
+        if (level := levels.get(name.upper())) is not None:
             return tester(level=level)
         raise AttributeError
 
@@ -65,56 +66,58 @@ levels_hook = _Levels()
 
 
 def levels_test(self_test):
-    with self_test.child(hooks=(levels_hook,)) as test:
-        runs = [None, None]
-        with test.child('tst', level=CRITICAL) as tst:
-            @tst.critical
-            def a_critial_test_always_runs():
-                runs[0] = True
-            @tst.unit
-            def a_unit_test_often_runs():
-                runs[1] = True
-        test.eq([True, None], runs)
+    def run_various_tests(test):
+        runs = [0, 0, 0, 0, 0, 0]
+        @test.critical
+        def a_critial_test():
+            runs[0] = 1
+        @test.unit
+        def a_unit_test():
+            runs[1] = 1
+        @test.integration
+        def a_integration_test():
+            runs[2] = 1
+        @test.performance
+        def a_performance_test():
+            runs[3] = 1
+        @test.notset
+        def a_notset_test():
+            runs[4] = 1
+        @test
+        def a_default_test():
+            runs[5] = 1
+        return runs
 
-        runs = [None, None]
-        with test.child(level='integration') as tst:
-            @tst.integration
-            def a_integration_test_sometimes_runs():
-                runs[0] = True
-            @tst.performance
-            def a_performance_test_sometimes_runs():
-                runs[1] = True
-        test.eq([True, None], runs)
+    @self_test
+    def probe_various_levels_and_thresholds():
+        with self_test.child(hooks=(levels_hook,), level='unit', threshold='critical') as test:
+            r = run_various_tests(test)
+            assert [1, 0, 0, 0, 0, 0] == r, r
 
-        runs = [None, None]
-        with test.child(level=PERFORMANCE) as perf:
-            with perf.child(level=INTEGRATION) as inte:
-                with inte.child(level=UNIT) as unit:
-                    @unit.critical
-                    def a_critical_test():
-                        runs[0] = True
-                    @unit.performance
-                    def a_performance_test():
-                        runs[1] = True
-        test.eq([True, None], runs)
+        with self_test.child(hooks=(levels_hook,), level='notset', threshold='unit') as test:
+            r = run_various_tests(test)
+            assert [1, 1, 0, 0, 0, 0] == r, r
 
-        runs = [0, 0, 0, 0, 0]
-        with test.child(level=INTEGRATION) as test_a:            # 30
-            with test_a.child(level=UNIT) as test_b:             # 40
-                with test_b.child(level=PERFORMANCE) as test_c:  # 20
-                    @test_c.critical                             # 50
-                    def b_critical_test():
-                        runs[0] = True
-                    @test_c.unit                                 # 40
-                    def b_unit_test():
-                        runs[1] = True
-                    @test_c.integration                          # 30
-                    def b_integration_test():
-                        runs[2] = True
-                    @test_c.performance                          # 20
-                    def b_performance_test():
-                        runs[3] = True
-                    @test_c                                      #  0
-                    def b_notset_test():
-                        runs[4] = True
-        test.eq([True, True, 0, 0, 0], runs)
+        with self_test.child(hooks=(levels_hook,), level='performance', threshold='integration') as test:
+            r = run_various_tests(test)
+            assert [1, 1, 1, 0, 0, 0] == r, r
+
+        with self_test.child(hooks=(levels_hook,), level='integration', threshold='performance') as test:
+            r = run_various_tests(test)
+            assert [1, 1, 1, 1, 0, 1] == r, r
+
+        with self_test.child(hooks=(levels_hook,), level='critical', threshold='notset') as test:
+            r = run_various_tests(test)
+            assert [1, 1, 1, 1, 1, 1] == r, r
+
+
+        with self_test.child(hooks=(levels_hook,), level='unit', threshold='integration') as test:
+            r = run_various_tests(test)
+            assert [1, 1, 1, 0, 0, 1] == r, r
+            with test.child(level='performance', threshold='notset') as test2: # threshold ignored
+                r = run_various_tests(test2)
+                assert [1, 1, 1, 0, 0, 0] == r, r
+            with test.child(level='integration', threshold='performance') as test2: # threshold ignored
+                r = run_various_tests(test2)
+                assert [1, 1, 1, 0, 0, 1] == r, r
+

@@ -1,7 +1,7 @@
 
 import autotest
 
-test = autotest.get_tester(__name__)
+test = autotest.get_tester(__name__).getChild(subprocess=True)
 
 @test
 def one_simple_test():

@@ -52,7 +52,7 @@ sys.path.insert(0, cwd.as_posix())
 
 p = optparse.OptionParser(usage="usage: %prog [options] module")
 p.add_option('-f', '--filter', help="only run tests whose qualified name contains FILTER")
-p.add_option('-l', '--level', help="only run tests whose level is >= LEVEL",
+p.add_option('-t', '--threshold', help="only run tests whose level is >= THRESHOLD",
         choices=[l.lower() for l in autotest.levels.levels.keys() if isinstance(l, str)])
 options, args = p.parse_args()
 
@@ -60,10 +60,8 @@ options, args = p.parse_args()
 test_options = {}
 if f := options.filter:
     test_options['filter'] = f
-if l := options.level:
-    test_options['level'] = l
-if test_options:
-    autotest.basic_config(**test_options)
+test_options['threshold'] = options.threshold or 'integration'
+autotest.basic_config(**test_options)
 
 
 root = autotest.get_tester()

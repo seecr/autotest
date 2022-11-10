@@ -1,17 +1,16 @@
 
-import tempfile
-import pathlib
-import inspect
-import asyncio
-import contextlib
+import tempfile         # for tmp_path
+import pathlib          # for tmp_path
+import inspect          # detect generators (for context manager)
+import asyncio          # access to loop
+import contextlib       # exit stacks
 import asyncio          # support for async test and fixtures
-import sys
-import os
-import io
-import time
+import sys              # fiddling with stdout/err
+import os               # fiddling with stdout/err file descriptors
+
 
 from .utils import asyncio_filtering_exception_handler, ensure_async_generator_func
-from .utils import extend_closure, frame_to_traceback
+from .utils import extend_closure
 from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
@@ -278,7 +277,7 @@ def fixtures_test(self_test):
     def capture_stdout_child_processes(stdout):
         import multiprocessing
         def f():
-            @self_test
+            @self_test(child=True)
             def in_child():
                 print("hier ben ik")
                 assert 1 == 1

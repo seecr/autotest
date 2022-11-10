@@ -1,9 +1,5 @@
 import multiprocessing
 import asyncio
-import sys
-
-
-is_main_process = multiprocessing.current_process().name == "MainProcess"
 
 
 def spawn(f):
@@ -13,11 +9,27 @@ def spawn(f):
     return p
 
 
-def child():
+def fork(f):
+    ctx = multiprocessing.get_context('fork')
+    p = ctx.Process(target=f)
+    p.start()
+    return p
+
+
+def subprocess():
+    """ when spawned, imports autotest freshly, potentially running al tests
+            but this is prevented by default, use subprocess=True when needed
+        when forked, use existing loaded autotest, not running tests
+            so no special measures are taken and both tests run
+    """
+    import autotest
+    test = autotest.get_tester('subprocess')
     @test
-    def in_child():
-        print("I am a happy child", flush=True)
-        assert 1 == 1
+    def one_test_not_run():
+        print("In a forked child, I run.")
+    @test(subprocess=True)
+    def one_does_run():
+        print("In any child, I run.")
 
 
 def integration_test(test):
@@ -41,35 +53,37 @@ def integration_test(test):
         test.eq(m, "integration_test.<locals>.import_submodule_failure\ntiedeldom\n")
 
 
-    if is_main_process:
+
+    with test.raises(AssertionError, "Use combine:3 instead of combine=3"):
         @test
-        def silence_child_processes(stdout, stderr):
-            p = spawn(child) # <= causes import of all current modules
-            p.join(3)
-            # if it didn't load (e.g. SyntaxError), do not run test to avoid
-            # failures introduced by other modules that loaded as a result
-            # of multiprocessing spawn, but failed
-            if p.exitcode == 0:
-                out = stdout.getvalue()
-                test.contains(out, "I am a happy child")
-                test.not_("in_child" in out)
+        def fixture_args_as_annotain_iso_defaul(combine=3):
+            """ fixture args are not default args: '=' instead of ':' raises error """
+            pass
 
 
-        with test.raises(AssertionError, "Use combine:3 instead of combine=3"):
-            @test
-            def fixture_args_as_annotain_iso_defaul(combine=3):
-                """ fixture args are not default args: '=' instead of ':' raises error """
-                pass
+    @test(bind=True)
+    def by_default_do_not_run_in_spawned_processes(stdout, stderr):
+        spawn(subprocess).join()
+        test.contains(stderr.getvalue(), 'subprocess.<locals>.one_does_run')
+        test.eq('In any child, I run.\n', stdout.getvalue())
 
-        @test.fixture
-        def async_combine(a):
-            yield a
 
-        with test.raises(AssertionError, "Use async_combine:3 instead of async_combine=3"):
-            @test
-            async def fixture_args_as_annotain_iso_defaul(async_combine=3):
-                """ fixture args are not default args: '=' instead of ':' raises error """
-                pass
+    @test(bind=True)
+    def test_do_not_run_in_child_processes(stdout):
+        fork(subprocess).join()
+        test.eq('In a forked child, I run.\nIn any child, I run.\n', stdout.getvalue())
+
+
+    @test.fixture
+    def async_combine(a):
+        yield a
+
+
+    with test.raises(AssertionError, "Use async_combine:3 instead of async_combine=3"):
+        @test
+        async def fixture_args_as_annotain_iso_defaul(async_combine=3):
+            """ fixture args are not default args: '=' instead of ':' raises error """
+            pass
 
 
     @test
