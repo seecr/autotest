@@ -12,9 +12,8 @@ Autotest is a simple and extensible test tool for Python. The key differences ar
 
 - tests are *ordinary functions* and are part of the application code,
 - gathering tests is *automatic* and follows the structure of your code,
+- supports test *levels* and *filtering*
 - testing *stops on first failure* with a standard Python stack trace,
-- *production also runs tests*, at least at startup,
-- it relies on well-known *standard/builtin* modules,
 - *asyncio* fully supported.
 
 **Test Dependencies**
@@ -54,7 +53,7 @@ Meanwhile autotest gained some features. It
 #) *makes refactoring easier*, even across projects, tests just move with code,
 #) executes tests *immediately* after discovery,
 #) *stops on first failure*, fits into a fast REPL-style way of working,
-#) supports *levels*: unit, integration, performanc etc.,
+#) supports *levels*: unit, integration, performance etc.,
 #) there are *fixtures* (context managers) like in other test tools,
 #) *async tests and fixtures* are fully supported,
 #) most functionality is in *hooks* which you can extend easily,
