@@ -27,6 +27,7 @@ logger = logging.getLogger('autotest')
 """ by default, tests are suppressed in subprocesses because many tests run
     during import, which can easily lead to an endless loop.
     Use subprocess=True when needed.
+    This is NOT the same as preventing __main__ from running multiple time!
 """
 is_subprocess = 'AUTOTEST_PARENT' in os.environ
 os.environ['AUTOTEST_PARENT'] = 'Y'

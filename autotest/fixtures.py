@@ -40,6 +40,7 @@ class _Fixtures:
     def __init__(self, runner, func):
         self.runner = runner
         self.func = func
+        self.__name__ = func.__name__ # support getting name for exceptions etc #TODO test
 
 
     @classmethod
