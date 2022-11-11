@@ -439,8 +439,6 @@ An example for using ``raises()`` in two different ways:
 
 Fixtures can be async (``async def``) but async fixtures can only be used in async tests. Async fixtures are executed in the event loop of the async test they are declared for.
 
-The option ``timeout=<time in s>`` specifies the maximum amount in seconds a fixture can run. After that an ``TimeoutError`` is raised.
-
 Fixtures is included in the default root tester.
 
 
@@ -475,7 +473,9 @@ Diffs is included in the default root tester.
 Async
 -----
 
-Hook ``asyncer.py`` supports ``asyncio`` tests defined with ``async def``. Async tests can contain other async tests, however due to limitations in Python (being that async is partially a syntax feature and not fully dynamic) this forces nested async tests to be executed in a separate event loop in a separate thread.
+Hook ``asyncer.py`` supports ``asyncio`` tests defined with ``async def``. Async tests can contain other async tests, however due to limitations in Python (being that async is partially a syntax feature and not fully dynamic) this forces nested async tests to be executed in a separate event loop in a *separate thread*.
+
+Non-nested async tests are run in a new event loop in de *current thread*.
 
 The option ``timeout=<time in s>`` specifies the maximum amount in seconds a test can run. After that an ``TimeoutError`` is raised.
 
@@ -518,7 +518,7 @@ integration   30
 performance   20
 =========== =======
 
-The default level is ``unit``. Test levels are provides as attributes on the tester:
+The default level is ``unit``. Test levels are provided as attributes on the tester:
 
 .. code:: python
 
@@ -613,7 +613,7 @@ For example to run your tests but not the imported ones from other packages:
 
 .. code:: bash
 
-  $ autotest --filter mymodule mymodule
+  $ autotest --threshold mymodule mymodule
 
 
 **Production**
