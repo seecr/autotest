@@ -193,14 +193,14 @@ All methods are 100% equivalent. In fact, the full signature is:
 So you can run multiple test functions with the given options at once.
 
 
-``getChild(**options)``
+``get_child(**options)``
 
 This function is an alias for ``__call__(**options)``. It does exactly the same.
 
 
 ``child(**options)``
 
-This creates a child and returns a context manager. Afterwards it will log the number of tests found and run.
+This creates a child and returns a context manager.
 
 .. code:: python
 
@@ -211,7 +211,7 @@ This creates a child and returns a context manager. Afterwards it will log the n
            pass
 
 
-``addHandler(handler)``
+``add_handler(handler)``
 
 Adds a Python Logger object (from standard module ``logging``) as a handler for output. Child testers will delegate to their parents if they have no handlers themselves. If no handler is present output will be send to the a general autotest logger (``logging.getLogger('autotest')``). See ``__main__.py`` for an example.
 
@@ -235,7 +235,7 @@ The core knows three options. Hooks may support additional options. Options can 
 
 - ``basic_config(**options)``,
 - ``__call__(**options)``,
-- ``getChild(**options)``,
+- ``get_child(**options)``,
 - ``child(**options)``.
 
 

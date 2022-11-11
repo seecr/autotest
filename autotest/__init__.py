@@ -47,7 +47,7 @@ import os
 from .tester import Tester, self_test
 @self_test
 def assert_stats():
-    assert {'found': 23, 'run': 22} == self_test.stats, self_test.stats
+    assert {'found': 20, 'run': 19} == self_test.stats, self_test.stats
 
 
 from .levels import levels_hook, levels_test
@@ -81,7 +81,7 @@ diff_test(self_test)
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 150, 'run': 124}, self_test.stats)
+    self_test.eq({'found': 147, 'run': 121}, self_test.stats)
 
 
 def assemble_root_runner(**options):

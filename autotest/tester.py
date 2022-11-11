@@ -57,16 +57,18 @@ class Tester:
     def getChild(self, *_, **__):
         return Tester(*_, parent=self, **__)
 
+    get_child = getChild
+
 
     @contextlib.contextmanager
     def child(self, *_, **__):
-        child = self.getChild(*_, **__)
-        yield child
-        child.log_stats()
+        yield self.getChild(*_, **__)
 
 
     def addHandler(self, handler):
         self._loghandlers.append(handler)
+
+    add_handler = addHandler
 
 
     def handle(self, logrecord):
@@ -403,19 +405,6 @@ class logging_handlers:
         log_msg = s.getvalue()
         qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
         self_test.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
-
-
-    @self_test
-    def log_stats():
-        with intercept() as i:
-            with self_test.child() as tst:
-                @tst
-                def one(): pass
-                @tst
-                def two(): pass
-            tst.eq(3, len(i))
-            msg = i[2].msg
-            tst.contains(msg, "found: 2, run: 2")
 
 
     @self_test
