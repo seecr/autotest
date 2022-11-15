@@ -362,18 +362,18 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         loglines = stdout.getvalue().splitlines()
         assert 'importing autotest.tests.tryout' in loglines[0], loglines
         assert "TEST:UNIT:\033[1mautotest.tests.tryout\033[0m:\033[1mone_simple_test\033[0m:" in loglines[1], loglines
-        assert "autotest/tests/tryout.py:6" in loglines[1], loglines
+        assert "autotest/tests/tryout.py:28" in loglines[1], loglines
         assert "TEST:INTEGRATION:\033[1mautotest.tests.tryout\033[0m:\033[1mone_more_test\033[0m:" in loglines[2], loglines
-        assert "autotest/tests/tryout.py:10" in loglines[2]
+        assert "autotest/tests/tryout.py:32" in loglines[2]
         assert len(loglines) == 3
         lines = stderr.getvalue().splitlines()
-        assert "  7  \tdef one_simple_test():" == lines[0]
-        assert "  8  \t    test.eq(1, 1)" == lines[1]
-        assert "  9  \t" == lines[2]
-        assert " 10  \t@test.integration" == lines[3]
-        assert " 11  \tasync def one_more_test():" == lines[4]
-        assert ' 12  ->\t    assert 1 == 2, "one is not two"' == lines[5]
-        assert " 13  \t    test.eq(1, 2)" == lines[6]
+        assert " 29  \tdef one_simple_test():" == lines[0]
+        assert " 30  \t    test.eq(1, 1)" == lines[1]
+        assert " 31  \t" == lines[2]
+        assert " 32  \t@test.integration" == lines[3]
+        assert " 33  \tasync def one_more_test():" == lines[4]
+        assert ' 34  ->\t    assert 1 == 2, "one is not two"' == lines[5]
+        assert " 35  \t    test.eq(1, 2)" == lines[6]
         assert "[EOF]" == lines[7]
         assert "Traceback (most recent call last):" in lines[8]
         # some stuff in between we can't get rid off
