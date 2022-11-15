@@ -29,7 +29,7 @@ here = pathlib.Path(__file__).parent.resolve()
 
 long_description = (here/"README.rst").read_text(encoding="utf-8")
 
-version='0.1.5'
+version='0.2.0'
 
 setup(
     name='autotest',
