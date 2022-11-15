@@ -613,7 +613,7 @@ For example to run your tests but not the imported ones from other packages:
 
 .. code:: bash
 
-  $ autotest --threshold mymodule mymodule
+  $ autotest --filter mymodule mymodule
 
 
 **Production**
