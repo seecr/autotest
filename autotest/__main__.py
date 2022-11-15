@@ -7,7 +7,7 @@ import importlib
 import pathlib
 import optparse
 import os
-
+import os.path
 
 """
 Runs autotests reporting to stdout.
@@ -41,18 +41,20 @@ if 'AUTOTEST_MAIN' not in os.environ:
         return t, v, tb
 
 
+    cwd = pathlib.Path.cwd()
+    sys.path.insert(0, cwd.as_posix())
+
+
+    fullcwd = cwd.resolve()
     class LevelNameAdapter(logging.Handler):
         def emit(self, r):
             testlevelname = autotest.levels.levels.get(r.levelno)
-            print(f"TEST:{testlevelname}:{r.name}:{r.msg}:{r.pathname}:{r.lineno}")
+            rel_path = None if r.pathname is None else os.path.relpath(pathlib.Path(r.pathname), fullcwd)
+            print(f"TEST:{testlevelname}:\033[1m{r.name}\033[0m:\033[1m{r.msg}\033[0m:{rel_path}:{r.lineno}")
 
 
     insert_excepthook(code_print_excepthook)
     insert_excepthook(lambda t, v, tb: (t, v, autotest.utils.filter_traceback(tb)))
-
-
-    cwd = pathlib.Path.cwd()
-    sys.path.insert(0, cwd.as_posix())
 
 
     p = optparse.OptionParser(usage="usage: %prog [options] module")

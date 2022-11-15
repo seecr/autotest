@@ -361,10 +361,10 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
         loglines = stdout.getvalue().splitlines()
         assert 'importing autotest.tests.tryout' in loglines[0], loglines
-        assert "TEST:UNIT:autotest.tests.tryout:one_simple_test:" in loglines[1], loglines
-        assert "autotest/autotest/tests/tryout.py:6" in loglines[1]
-        assert "TEST:INTEGRATION:autotest.tests.tryout:one_more_test:" in loglines[2], loglines[2]
-        assert "autotest/autotest/tests/tryout.py:10" in loglines[2]
+        assert "TEST:UNIT:\033[1mautotest.tests.tryout\033[0m:\033[1mone_simple_test\033[0m:" in loglines[1], loglines
+        assert "autotest/tests/tryout.py:6" in loglines[1], loglines
+        assert "TEST:INTEGRATION:\033[1mautotest.tests.tryout\033[0m:\033[1mone_more_test\033[0m:" in loglines[2], loglines
+        assert "autotest/tests/tryout.py:10" in loglines[2]
         assert len(loglines) == 3
         lines = stderr.getvalue().splitlines()
         assert "  7  \tdef one_simple_test():" == lines[0]
@@ -403,10 +403,10 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         self_test2.eq('', e)
         o = stdout.getvalue()
         self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
-        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
+        self_test2.contains(o, "TEST:UNIT:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_simple_test\033[0m")
+        self_test2.contains(o, "TEST:INTEGRATION:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_integration_test\033[0m")
         self_test2.comp.contains(o, "one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:root:stats: found: 3, run: 2:")
+        self_test2.contains(o, "TEST:UNIT:\033[1mroot\033[0m:\033[1mstats: found: 3, run: 2\033[0m:")
 
 
     @self_test2
@@ -416,10 +416,11 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         self_test2.eq('', e)
         o = stdout.getvalue()
         self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:UNIT:autotest.tests.tryout2:one_simple_test")
-        self_test2.contains(o, "TEST:INTEGRATION:autotest.tests.tryout2:one_integration_test")
+        # tests contain relative paths
+        self_test2.contains(o, "TEST:UNIT:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_simple_test\033[0m:../autotest/tests/tryout2.py")
+        self_test2.contains(o, "TEST:INTEGRATION:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_integration_test\033[0m:../autotest/tests/tryout2.py")
         self_test2.comp.contains(o, "one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:root:stats: found: 3, run: 2:")
+        self_test2.contains(o, "TEST:UNIT:\033[1mroot\033[0m:\033[1mstats: found: 3, run: 2\033[0m:")
 
     @self_test2
     def main_with_filter(stdout, stderr):
