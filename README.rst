@@ -595,6 +595,7 @@ Running tests during development can be done by just running or importing your m
 
 When you only want to develop a submodule, just ``cd`` down into that directory and do the same. Only the tests of that submodule (and everything in imports) will be tested.
 
+
 The methode above just prints crude messages and has no way to use options. For that use the main that comes with autotest:
 
 .. code:: bash
@@ -609,11 +610,22 @@ The methode above just prints crude messages and has no way to use options. For 
     -t , --threshold=THRESHOLD
                         only run tests whose level is >= THRESHOLD
 
+
 For example to run your tests but not the imported ones from other packages:
 
 .. code:: bash
 
   $ autotest --filter mymodule mymodule
+
+
+If you want to run the tests for autotests itself, go to the autotest project directory and use:
+
+.. code:: bash
+
+  $ python -c "import autotest"  autotest.selftest
+
+The argument ``autotest.selftest`` lets autotest run its own tests, which are normally skipped.
+Also, this avoids using the autotest main program because it is not guaranteed that an installed old version of autotest can run its own test from the future.
 
 
 **Production**
