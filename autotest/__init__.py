@@ -47,7 +47,7 @@ import os
 from .tester import Tester, self_test
 @self_test
 def assert_stats():
-    assert {'found': 20, 'run': 19} == self_test.stats, self_test.stats
+    assert {'found': 21, 'run': 20} == self_test.stats, self_test.stats
 
 
 from .levels import levels_hook, levels_test
@@ -81,7 +81,7 @@ diff_test(self_test)
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 147, 'run': 121}, self_test.stats)
+    self_test.eq({'found': 148, 'run': 122}, self_test.stats)
 
 
 def assemble_root_runner(**options):
@@ -256,7 +256,7 @@ testers.clear()
 def run_integration_tests():
     root_tester_assembly_test(assemble_root_runner())
     from .integrationtests import integration_test
-    integration_test(assemble_root_runner())
+    integration_test(assemble_root_runner().integration)
 
 
 testers.clear()
@@ -329,7 +329,7 @@ def setup_correct():
 
 
 """
-We put these last, as printing any debug/trace messages anywhere in th code causes this
+We put these last, as printing any debug/trace messages anywhere in the code causes this
 to fail.
 """
 
@@ -359,32 +359,33 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
     def main_test(stderr, stdout):
         import os
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
-        loglines = stdout.getvalue().splitlines()
-        assert 'importing autotest.tests.tryout' in loglines[0], loglines
-        assert "TEST:UNIT:\033[1mautotest.tests.tryout\033[0m:\033[1mone_simple_test\033[0m:" in loglines[1], loglines
-        assert "autotest/tests/tryout.py:28" in loglines[1], loglines
-        assert "TEST:INTEGRATION:\033[1mautotest.tests.tryout\033[0m:\033[1mone_more_test\033[0m:" in loglines[2], loglines
-        assert "autotest/tests/tryout.py:32" in loglines[2]
-        assert len(loglines) == 3
-        lines = stderr.getvalue().splitlines()
-        assert " 29  \tdef one_simple_test():" == lines[0]
-        assert " 30  \t    test.eq(1, 1)" == lines[1]
-        assert " 31  \t" == lines[2]
-        assert " 32  \t@test.integration" == lines[3]
-        assert " 33  \tasync def one_more_test():" == lines[4]
-        assert ' 34  ->\t    assert 1 == 2, "one is not two"' == lines[5]
-        assert " 35  \t    test.eq(1, 2)" == lines[6]
-        assert "[EOF]" == lines[7]
-        assert "Traceback (most recent call last):" in lines[8]
+        e = stderr.getvalue()
+        s = stdout.getvalue()
+        assert '' == s, s
+        loglines = e.splitlines()
+        assert 'importing autotest.tests.tryout' in loglines[0], loglines[0]
+        assert loglines[1].startswith("WARNING:autotest.autotest.tests.tryout:UNIT:\033[1mone_simple_test\033[0m:/"), loglines[1]
+        assert loglines[1].endswith("/autotest/autotest/tests/tryout.py:28"), loglines[1]
+        assert loglines[2].startswith("WARNING:autotest.autotest.tests.tryout:INTEGRATION:\033[1mone_more_test\033[0m:/"), loglines[2]
+        assert loglines[2].endswith("/autotest/autotest/tests/tryout.py:32"), loglines[2]
+        assert " 29  \tdef one_simple_test():" == loglines[3]
+        assert " 30  \t    test.eq(1, 1)" == loglines[4]
+        assert " 31  \t" == loglines[5]
+        assert " 32  \t@test.integration" == loglines[6]
+        assert " 33  \tasync def one_more_test():" == loglines[7]
+        assert ' 34  ->\t    assert 1 == 2, "one is not two"' == loglines[8]
+        assert " 35  \t    test.eq(1, 2)" == loglines[9]
+        assert "[EOF]" == loglines[10]
+        assert "Traceback (most recent call last):" in loglines[11]
         # some stuff in between we can't get rid off
-        assert "in <module>" in lines[-5]
-        assert "autotest/tests/tryout.py" in lines[-5]
-        assert "async def one_more_test():" in lines[-4]
-        assert "in one_more_test" in lines[-3]
-        assert "autotest/tests/tryout.py" in lines[-3]
-        assert "assert 1 == 2" in lines[-2]
-        assert "AssertionError: one is not two" in lines[-1], lines[-1]
-        assert 27 == len(lines), '\n'.join(repr(l) for l in lines)
+        assert "in <module>" in loglines[-5]
+        assert "autotest/tests/tryout.py" in loglines[-5]
+        assert "async def one_more_test():" in loglines[-4]
+        assert "in one_more_test" in loglines[-3]
+        assert "autotest/tests/tryout.py" in loglines[-3]
+        assert "assert 1 == 2" in loglines[-2]
+        assert "AssertionError: one is not two" in loglines[-1], loglines[-1]
+        assert 30 == len(loglines), '\n'.join(repr(l) for l in loglines)
 
 
     #@self_test2
@@ -396,62 +397,60 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         assert len(lns) == 144, len(lns) # number of logged tests, sort of
 
 
+    def assert_output(stdout, stderr):
+        o = stdout.getvalue()
+        self_test2.eq('', o)
+        lines = stderr.getvalue().splitlines()
+        self_test2.startswith(lines[0], "WARNING:autotest:\033[1mimporting autotest.tests.tryout2\033[0m:/")
+        self_test2.startswith(lines[1], "WARNING:autotest.autotest.tests.tryout2:UNIT:\033[1mone_simple_test\033[0m:/")
+        self_test2.startswith(lines[2], "WARNING:autotest.autotest.tests.tryout2:INTEGRATION:\033[1mone_integration_test\033[0m:/")
+        self_test2.startswith(lines[3], "WARNING:autotest:UNIT:\033[1mstats: found: 3, run: 2\033[0m:")
+
+
     @self_test2
     def main_via_bin_script_with_autotest_on_path(stdout, stderr):
         os.system(f'PATH=./bin:$PATH autotest autotest/tests/tryout2.py')
-        e = stderr.getvalue()
-        self_test2.eq('', e)
-        o = stdout.getvalue()
-        self_test2.startswith(o, "importing autotest.tests.tryout2")
-        self_test2.contains(o, "TEST:UNIT:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_simple_test\033[0m")
-        self_test2.contains(o, "TEST:INTEGRATION:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_integration_test\033[0m")
-        self_test2.comp.contains(o, "one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:\033[1mroot\033[0m:\033[1mstats: found: 3, run: 2\033[0m:")
+        assert_output(stdout, stderr)
 
 
     @self_test2
     def main_via_bin_script_in_cur_dir(stdout, stderr):
         os.system(f'(cd bin; ./autotest autotest/tests/tryout2.py)')
-        e = stderr.getvalue()
-        self_test2.eq('', e)
-        o = stdout.getvalue()
-        self_test2.startswith(o, "importing autotest.tests.tryout2")
-        # tests contain relative paths
-        self_test2.contains(o, "TEST:UNIT:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_simple_test\033[0m:../autotest/tests/tryout2.py")
-        self_test2.contains(o, "TEST:INTEGRATION:\033[1mautotest.tests.tryout2\033[0m:\033[1mone_integration_test\033[0m:../autotest/tests/tryout2.py")
-        self_test2.comp.contains(o, "one_performance_test")
-        self_test2.contains(o, "TEST:UNIT:\033[1mroot\033[0m:\033[1mstats: found: 3, run: 2\033[0m:")
+        assert_output(stdout, stderr)
+
 
     @self_test2
     def main_with_filter(stdout, stderr):
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --filter one_simple")
-        e = stderr.getvalue()
-        assert '' == e, e
         o = stdout.getvalue()
-        assert 'one_simple_test' in o
-        assert 'one_integration_test' not in o
-        assert 'one_performance_test' not in o
-        assert 'found: 3, run: 1' in o
+        assert '' == o, o
+        e = stderr.getvalue()
+        assert 'one_simple_test' in e, e
+        assert 'one_integration_test' not in e, e
+        assert 'one_performance_test' not in e
+        assert 'found: 3, run: 1' in e, e
+
 
     @self_test2
     def main_with_level_unit(stdout, stderr):
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold unit")
-        e = stderr.getvalue()
-        assert '' == e, e
         o = stdout.getvalue()
-        assert 'one_simple_test' in o, o
-        assert 'one_integration_test' not in o, o
-        assert 'one_performance_test' not in o
-        assert 'found: 3, run: 1' in o, o
+        assert '' == o, o
+        e = stderr.getvalue()
+        assert 'one_simple_test' in e, e
+        assert 'one_integration_test' not in e, e
+        assert 'one_performance_test' not in e
+        assert 'found: 3, run: 1' in e, e
+
 
     @self_test2
     def main_with_level_integration(stdout, stderr):
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold integration")
-        e = stderr.getvalue()
-        assert '' == e, e
         o = stdout.getvalue()
-        assert 'one_simple_test' in o, o
-        assert 'one_integration_test' in o, o
-        assert 'one_performance_test' not in o
-        assert 'found: 3, run: 2' in o, o
+        assert '' == o, o
+        e = stderr.getvalue()
+        assert 'one_simple_test' in e, e
+        assert 'one_integration_test' in e, e
+        assert 'one_performance_test' not in e
+        assert 'found: 3, run: 2' in e, e
 

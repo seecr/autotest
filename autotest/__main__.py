@@ -31,6 +31,7 @@ import optparse
 import os
 import os.path
 
+
 """
 Runs autotests reporting to stdout.
 
@@ -67,14 +68,6 @@ if 'AUTOTEST_MAIN' not in os.environ:
     sys.path.insert(0, cwd.as_posix())
 
 
-    fullcwd = cwd.resolve()
-    class LevelNameAdapter(logging.Handler):
-        def emit(self, r):
-            testlevelname = autotest.levels.levels.get(r.levelno)
-            rel_path = None if r.pathname is None else os.path.relpath(pathlib.Path(r.pathname), fullcwd)
-            print(f"TEST:{testlevelname}:\033[1m{r.name}\033[0m:\033[1m{r.msg}\033[0m:{rel_path}:{r.lineno}")
-
-
     insert_excepthook(code_print_excepthook)
     insert_excepthook(lambda t, v, tb: (t, v, autotest.utils.filter_traceback(tb)))
 
@@ -93,14 +86,14 @@ if 'AUTOTEST_MAIN' not in os.environ:
     autotest.basic_config(**test_options)
 
 
+    logging.basicConfig(style='{', format="{levelname}:{name}:\033[1m{message}\033[0m:{pathname}:{lineno}")
+
+
     root = autotest.get_tester()
-    root.addHandler(LevelNameAdapter())
-
-
     if len(args) == 1:
         p = pathlib.Path(args[0])
         modulename = '.'.join(p.parent.parts + (p.stem,))
-        print("importing", modulename)
+        logging.getLogger('autotest').warning(f"importing {modulename}")
         importlib.import_module(modulename)
         root.log_stats()
     else:

@@ -44,9 +44,11 @@ import logging
 
 CRITICAL    = logging.CRITICAL  # 50
 UNIT        = logging.ERROR     # 40
-INTEGRATION = logging.WARNING   # 30
+INTEGRATION = logging.WARNING   # 30   default in Python logging
 PERFORMANCE = logging.INFO      # 20
 NOTSET      = logging.NOTSET    #  0
+
+CRITICAL
 
 levels = {
     'CRITICAL':     CRITICAL,
@@ -83,6 +85,14 @@ class _Levels:
         if (level := levels.get(name.upper())) is not None:
             return tester(level=level)
         raise AttributeError
+
+    def logrecord(self, tester, func, record):
+        level = tester.level
+        strlevel = levels[level]
+        record.testlevel = level
+        record.testlevelname = strlevel
+        record.name = f"{record.name}:{strlevel}"
+        return record
 
 
 levels_hook = _Levels()

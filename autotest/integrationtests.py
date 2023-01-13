@@ -60,8 +60,8 @@ def integration_test(test):
     @test
     def import_submodule(stdout, stderr):
         from autotest.tests.sub_module_ok import marker
-        test.eq('test_one\n', stderr.getvalue())
         test.eq("TESTER: <Tester 'autotest.tests.sub_module_ok'>\n", stdout.getvalue())
+        test.eq('test_one\n', stderr.getvalue())
 
 
     try:

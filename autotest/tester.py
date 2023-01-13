@@ -41,6 +41,8 @@ import contextlib       # child as context
 import collections      # chain maps for hierarchical Tester and Counter
 import logging          # output to logger
 import os               # controlling env
+import sys              # maxsize
+import io               # formatting tests
 
 
 logger = logging.getLogger('autotest')
@@ -49,7 +51,7 @@ logger = logging.getLogger('autotest')
 """ by default, tests are suppressed in subprocesses because many tests run
     during import, which can easily lead to an endless loop.
     Use subprocess=True when needed.
-    This is NOT the same as preventing __main__ from running multiple time!
+    This is NOT the same as preventing __main__ from running multiple times!
 """
 is_subprocess = 'AUTOTEST_PARENT' in os.environ
 os.environ['AUTOTEST_PARENT'] = 'Y'
@@ -86,22 +88,6 @@ class Tester:
     @contextlib.contextmanager
     def child(self, *_, **__):
         yield self.getChild(*_, **__)
-
-
-    def addHandler(self, handler):
-        self._loghandlers.append(handler)
-
-    add_handler = addHandler
-
-
-    def handle(self, logrecord):
-        if handlers := self._loghandlers:
-            for h in handlers:
-                h.handle(logrecord)
-        elif self._parent:
-            self._parent.handle(logrecord)
-        else:
-            logger.handle(logrecord)
 
 
     def fail(self, *args, **kwds):
@@ -145,10 +131,15 @@ class Tester:
             p._stat(key)
 
 
-    def _create_logrecord(self, f, msg):
-        return logging.LogRecord(
-            self._name or 'root',                     # name of logger
-            self.level,                               # log level, bit intimate with levels_hook ;-(
+    def all_hooks(self):
+        return self.option_enumerate('hooks')
+
+
+    def _logtest(self, f, msg):
+        name = f"{logger.name}.{self._name}" if self._name else logger.name
+        record = logging.LogRecord(
+            name,                                     # name of logger
+            self.option_get('loglevel', logging.WARN), # level under which test messages get logged
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -157,6 +148,12 @@ class Tester:
             f.__name__ if f else None,                # name of the function invoking test.<op>
             None                                      # text representation of stack
             )
+        for hook in self.all_hooks():
+            try:
+                record = hook.logrecord(self, f, record)
+            except AttributeError:
+                pass
+        logger.handle(record)
 
 
     def _run(self, test_func, *app_args, **app_kwds):
@@ -165,24 +162,24 @@ class Tester:
         self._stat('found')
         orig_test_func = test_func
         if not is_subprocess or self.option_get('subprocess', False):
-            for hook in self.option_enumerate('hooks'):
+            for hook in self.all_hooks():
                 if not (test_func := hook(self, test_func)):
                     break
             else:
                 if self.option_get('run'):
                     self._stat('run')
-                    self.handle(self._create_logrecord(orig_test_func, orig_test_func.__qualname__))
+                    self._logtest(orig_test_func, orig_test_func.__qualname__) # TODO pass test func?
                     test_func(*app_args, **app_kwds)
         return orig_test_func if self.option_get('keep') else None
 
 
     def log_stats(self):
         name = self._name + '.stats: ' if self._name else 'stats: '
-        self.handle(self._create_logrecord(None, name + ', '.join(f'{k}: {v}' for k, v in self.stats.most_common())))
+        self._logtest(None, name + ', '.join(f'{k}: {v}' for k, v in self.stats.most_common()))
 
 
     def __getattr__(self, name):
-        for hook in self.option_enumerate('hooks'):
+        for hook in self.all_hooks():
             try:
                 return hook.lookup(self, name)
             except AttributeError:
@@ -215,7 +212,8 @@ else:
         def __call__(self, runner, func): pass
         def lookup(self, runner, name): return self
     self_test = Tester(hooks=[Ignore()])
-    self_test.addHandler(logging.NullHandler())
+    #self_test.addHandler(logging.NullHandler())
+
 
 
 @self_test
@@ -326,29 +324,12 @@ def call_test_with_complete_context():
     self_test(a_test)
 
 
-
-def stringio_handler():
-    import io
-    s = io.StringIO()
-    h = logging.StreamHandler(s)
-    h.setFormatter(logging.Formatter(fmt="{name}-{levelno}-{pathname}-{lineno}-{message}-{exc_info}-{funcName}-{stack_info}", style='{'))
-    return s, h
-
-
-def logging_runner(name):
-    s, myhandler = stringio_handler()
-    tester = Tester(name, hooks=[levels_hook])
-    tester.addHandler(myhandler)
-    return tester, s
-
-
 @contextlib.contextmanager
 def intercept():
     records = []
     class intercept:
-        level = 40
+        level = 30
         handle = records.append
-
     root_logger = logging.getLogger()
     root_logger.addHandler(intercept)
     try:
@@ -357,58 +338,26 @@ def intercept():
         root_logger.removeHandler(intercept)
 
 
+@contextlib.contextmanager
+def configure_stream_hander():
+    autotest_logger = logging.getLogger('autotest')
+    s = io.StringIO()
+    handler = logging.StreamHandler(s)
+    handler.setFormatter(logging.Formatter(fmt=logging._STYLES['%'][1]))
+    autotest_logger.addHandler(handler)
+    try:
+        yield s
+    finally:
+        autotest_logger.removeHandler(handler)
+
+
 class logging_handlers:
-
-    @self_test
-    def tester_with_handler():
-        tester, s = logging_runner('carl')
-        _line_ = inspect.currentframe().f_lineno
-        @tester
-        def a_test():
-            assert 1 == 1  # hooks for operators not present
-        log_msg = s.getvalue()
-        qname = "logging_handlers.tester_with_handler.<locals>.a_test"
-        self_test.eq(log_msg, f"carl-40-{__file__}-{_line_+1}-{qname}-None-a_test-None\n")
-
-
-    @self_test
-    def sub_tester_propagates():
-        """ propagate to parent """
-        main, s = logging_runner('main')
-        sub = main.getChild('sub1')
-        _line_ = inspect.currentframe().f_lineno
-        @sub
-        def my_sub_test():
-            assert 1 == 1  # hooks for operators not present
-        log_msg = s.getvalue()
-        self_test.startswith(log_msg, f"main.sub1-")
-        qname = "logging_handlers.sub_tester_propagates.<locals>.my_sub_test"
-        self_test.eq(log_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
-
-
-    @self_test
-    def sub_tester_does_not_propagate():
-        main, main_s = logging_runner('main')
-        sub_s, subhandler = stringio_handler()
-        sub = main.getChild('sub1')
-        sub.addHandler(subhandler)
-        _line_ = inspect.currentframe().f_lineno
-        @sub
-        def my_sub_test():
-            assert 1 == 1  # hooks for operators not present
-        main_msg = main_s.getvalue()
-        sub_msg = sub_s.getvalue()
-        self_test.startswith(sub_msg, f"main.sub1-")
-        qname = "logging_handlers.sub_tester_does_not_propagate.<locals>.my_sub_test"
-        self_test.eq(sub_msg, f"main.sub1-40-{__file__}-{_line_+1}-{qname}-None-my_sub_test-None\n")
-        self_test.eq('', main_msg) # do not duplicate message in parent
-
 
     @self_test
     def tester_delegates_to_root_logger():
         with intercept() as i:
             tester = Tester('free')
-            tester.level = 40 # no level hook yet, so we provide level this way
+            #tester.level = 40 # no level hook yet, so we provide level this way
             @tester
             def my_output_goes_to_root_logger():
                 assert 1 == 1 # hooks for operators not present
@@ -416,18 +365,88 @@ class logging_handlers:
 
 
     @self_test
-    def tester_with_handler_failing():
-        tester, s = logging_runner('esmee')
-        try:
+    def tester_with_unconfigured_logging():
+        tester = Tester("unconfigured_logging", hooks=[levels_hook])
+        with intercept() as records:
             _line_ = inspect.currentframe().f_lineno
             @tester
-            def a_failing_test():
-                assert 1 == 2
-        except AssertionError:
-            pass
-        log_msg = s.getvalue()
-        qname = "logging_handlers.tester_with_handler_failing.<locals>.a_failing_test"
-        self_test.eq(log_msg, f"esmee-40-{__file__}-{_line_+1}-{qname}-None-a_failing_test-None\n")
+            def a_test():
+                assert 1 == 1
+            self_test.eq((), records[0].args)
+            self_test.lt(1673605231.8793523, records[0].created)
+            self_test.eq(None, records[0].exc_info)
+            self_test.eq('tester.py', records[0].filename)
+            self_test.eq('a_test', records[0].funcName)
+            self_test.eq('WARNING', records[0].levelname)
+            self_test.eq(30, records[0].levelno)
+            self_test.eq(_line_+1, records[0].lineno)
+            self_test.eq('tester', records[0].module)
+            self_test.truth(10 < records[0].msecs < 1000)
+            self_test.eq('logging_handlers.tester_with_unconfigured_logging.<locals>.a_test', records[0].msg)
+            self_test.eq('autotest.unconfigured_logging:UNIT', records[0].name)
+            self_test.endswith(records[0].pathname, 'autotest/autotest/tester.py')
+            self_test.truth(2 < records[0].process < 100000)
+            self_test.eq('MainProcess', records[0].processName)
+            self_test.truth(1 < records[0].relativeCreated < 1000)
+            self_test.eq(None, records[0].stack_info)
+            self_test.truth(1 < records[0].thread < sys.maxsize)
+            self_test.eq('MainThread', records[0].threadName)
+            self_test.eq(40, records[0].testlevel)
+            self_test.eq('UNIT', records[0].testlevelname)
+
+
+    @self_test
+    def tester_with_default_formatting():
+        with configure_stream_hander() as s:
+            tester = Tester("default_formatting", hooks=[levels_hook])
+            @tester
+            def a_test():
+                assert 1 == 1  # hooks for operators not present
+            self_test.eq("WARNING:autotest.default_formatting:UNIT:logging_handlers.tester_with_default_formatting.<locals>.a_test\n", s.getvalue())
+
+
+    @self_test
+    def tester_without_a_name():
+        with configure_stream_hander() as s:
+            tester = Tester(hooks=[levels_hook])
+            @tester
+            def a_test():
+                assert 1 == 1  # hooks for operators not present
+            self_test.eq("WARNING:autotest:UNIT:logging_handlers.tester_without_a_name.<locals>.a_test\n", s.getvalue())
+
+
+    @self_test
+    def sub_tester():
+        with configure_stream_hander() as s:
+            main = Tester("main", hooks=[levels_hook])
+            sub1 = main.getChild('sub1')
+            sub2 = sub1.getChild('sub2')
+            @sub1
+            def sub1_test():
+                pass
+            @main
+            def main_test():
+                pass
+            @sub2
+            def sub2_test():
+                pass
+            loglines = s.getvalue().splitlines()
+            self_test.eq("WARNING:autotest.main.sub1:UNIT:logging_handlers.sub_tester.<locals>.sub1_test", loglines[0])
+            self_test.eq("WARNING:autotest.main:UNIT:logging_handlers.sub_tester.<locals>.main_test", loglines[1])
+            self_test.eq("WARNING:autotest.main.sub1.sub2:UNIT:logging_handlers.sub_tester.<locals>.sub2_test", loglines[2])
+
+
+    @self_test
+    def tester_with_handler_failing():
+        with configure_stream_hander() as s:
+            main = Tester("main", hooks=[levels_hook])
+            try:
+                @main
+                def a_failing_test():
+                    assert 1 == 2
+            except AssertionError:
+                pass
+            self_test.eq("WARNING:autotest.main:UNIT:logging_handlers.tester_with_handler_failing.<locals>.a_failing_test\n", s.getvalue())
 
 
     @self_test
