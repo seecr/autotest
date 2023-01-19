@@ -210,13 +210,6 @@ This creates a child and returns a context manager.
            pass
 
 
-``add_handler(handler)``
-
-Adds a Python Logger object (from standard module ``logging``) as a handler for output. Child testers will delegate to their parents if they have no handlers themselves. If no handler is present output will be send to the a general autotest logger (``logging.getLogger('autotest')``). See ``__main__.py`` for an example.
-
-This method is most useful on the root tester, but it can be set anywhere.
-
-
 ``fail(*args, **kwargs)``
 
 Use as guard in tests. Raises ``AssertionError`` with the given ``args``, appending ``kwargs`` to ``args``.
@@ -320,6 +313,11 @@ As an example, here is the hook for diffs, implementing both ``__call__`` and ``
           if name == 'prrint':
               return prrint
           raise AttributeError
+
+
+``logrecord(tester, func, record)``
+
+Implemented by a hook when it wants to change something in the logrecord before it is emitted to the logger. The ``levels`` hook uses this to add the level of the test to the logrecord as an extra attribute, for example.
 
 
 
@@ -543,6 +541,12 @@ Tests can also be put at a certain level with an option:
 
 The default ``threshold`` is ``integration``.
 
+The Levels hook adds the following information to any logrecord being generated:
+
+- the number of the test level (20..50) , as ``testlevel``
+- the name of the test level ('unit', 'integration', etc) as ``testlevelname``
+- the name of the test level is also prepended to the ``msg`` attribute of the logrecord
+
 A parent can have the ``threshold`` option set to one of the levels. This will block execution of tests in these children of levels lower than ``threshold``. Note that tests do not have levels, only Testers have. **NB:** the highest ``threshold`` in chain of parent-children determines the tests to run. This means a child tester can run integration tests (threshold='integration'), but the root tester can overrule this to run only unit tests.
 
 Levels is included in the default root tester.
@@ -643,4 +647,5 @@ You can als filter tests or run tests for a specific level only. Or suppress the
 **TODO**
 
 - also implement timeout for synchrounous code
+- log stats without the loglevel
 
