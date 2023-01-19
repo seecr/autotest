@@ -2,7 +2,7 @@
 #
 # "Autotest": a simpler test runner for python
 #
-# Copyright (C) 2022 Seecr (Seek You Too B.V.) https://seecr.nl
+# Copyright (C) 2022-2023 Seecr (Seek You Too B.V.) https://seecr.nl
 #
 # This file is part of "Autotest"
 #
@@ -42,13 +42,12 @@ import logging
     can raise the threshold in order to exclude tests.
 """
 
-CRITICAL    = logging.CRITICAL  # 50
-UNIT        = logging.ERROR     # 40
-INTEGRATION = logging.WARNING   # 30   default in Python logging
-PERFORMANCE = logging.INFO      # 20
-NOTSET      = logging.NOTSET    #  0
+CRITICAL    = 50
+UNIT        = 40
+INTEGRATION = 30
+PERFORMANCE = 20
+NOTSET      =  0
 
-CRITICAL
 
 levels = {
     'CRITICAL':     CRITICAL,
@@ -91,7 +90,7 @@ class _Levels:
         strlevel = levels[level]
         record.testlevel = level
         record.testlevelname = strlevel
-        record.name = f"{record.name}:{strlevel}"
+        record.msg = f"{strlevel}:{record.msg}"
         return record
 
 

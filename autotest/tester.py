@@ -2,7 +2,7 @@
 #
 # "Autotest": a simpler test runner for python
 #
-# Copyright (C) 2022 Seecr (Seek You Too B.V.) https://seecr.nl
+# Copyright (C) 2022-2023 Seecr (Seek You Too B.V.) https://seecr.nl
 #
 # This file is part of "Autotest"
 #
@@ -46,6 +46,10 @@ import io               # formatting tests
 
 
 logger = logging.getLogger('autotest')
+# in order to have tests shown when logging is unconfigured, we log at a level slightly
+# higher than the default level WARNING (30)
+default_loglevel = 33
+logging.addLevelName(default_loglevel, "TEST") # TODO make configurable
 
 
 """ by default, tests are suppressed in subprocesses because many tests run
@@ -139,7 +143,7 @@ class Tester:
         name = f"{logger.name}.{self._name}" if self._name else logger.name
         record = logging.LogRecord(
             name,                                     # name of logger
-            self.option_get('loglevel', logging.WARN), # level under which test messages get logged
+            self.option_get('loglevel', default_loglevel), # level under which test messages get logged
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
@@ -328,7 +332,7 @@ def call_test_with_complete_context():
 def intercept():
     records = []
     class intercept:
-        level = 30
+        level = 33
         handle = records.append
     root_logger = logging.getLogger()
     root_logger.addHandler(intercept)
@@ -357,7 +361,6 @@ class logging_handlers:
     def tester_delegates_to_root_logger():
         with intercept() as i:
             tester = Tester('free')
-            #tester.level = 40 # no level hook yet, so we provide level this way
             @tester
             def my_output_goes_to_root_logger():
                 assert 1 == 1 # hooks for operators not present
@@ -365,7 +368,7 @@ class logging_handlers:
 
 
     @self_test
-    def tester_with_unconfigured_logging():
+    def logrecords_contents():
         tester = Tester("unconfigured_logging", hooks=[levels_hook])
         with intercept() as records:
             _line_ = inspect.currentframe().f_lineno
@@ -377,13 +380,13 @@ class logging_handlers:
             self_test.eq(None, records[0].exc_info)
             self_test.eq('tester.py', records[0].filename)
             self_test.eq('a_test', records[0].funcName)
-            self_test.eq('WARNING', records[0].levelname)
-            self_test.eq(30, records[0].levelno)
+            self_test.eq('TEST', records[0].levelname)
+            self_test.eq(33, records[0].levelno)
             self_test.eq(_line_+1, records[0].lineno)
             self_test.eq('tester', records[0].module)
             self_test.truth(10 < records[0].msecs < 1000)
-            self_test.eq('logging_handlers.tester_with_unconfigured_logging.<locals>.a_test', records[0].msg)
-            self_test.eq('autotest.unconfigured_logging:UNIT', records[0].name)
+            self_test.eq('UNIT:logging_handlers.logrecords_contents.<locals>.a_test', records[0].msg)
+            self_test.eq('autotest.unconfigured_logging', records[0].name)
             self_test.endswith(records[0].pathname, 'autotest/autotest/tester.py')
             self_test.truth(2 < records[0].process < 100000)
             self_test.eq('MainProcess', records[0].processName)
@@ -402,7 +405,7 @@ class logging_handlers:
             @tester
             def a_test():
                 assert 1 == 1  # hooks for operators not present
-            self_test.eq("WARNING:autotest.default_formatting:UNIT:logging_handlers.tester_with_default_formatting.<locals>.a_test\n", s.getvalue())
+            self_test.eq("TEST:autotest.default_formatting:UNIT:logging_handlers.tester_with_default_formatting.<locals>.a_test\n", s.getvalue())
 
 
     @self_test
@@ -412,7 +415,7 @@ class logging_handlers:
             @tester
             def a_test():
                 assert 1 == 1  # hooks for operators not present
-            self_test.eq("WARNING:autotest:UNIT:logging_handlers.tester_without_a_name.<locals>.a_test\n", s.getvalue())
+            self_test.eq("TEST:autotest:UNIT:logging_handlers.tester_without_a_name.<locals>.a_test\n", s.getvalue())
 
 
     @self_test
@@ -431,9 +434,9 @@ class logging_handlers:
             def sub2_test():
                 pass
             loglines = s.getvalue().splitlines()
-            self_test.eq("WARNING:autotest.main.sub1:UNIT:logging_handlers.sub_tester.<locals>.sub1_test", loglines[0])
-            self_test.eq("WARNING:autotest.main:UNIT:logging_handlers.sub_tester.<locals>.main_test", loglines[1])
-            self_test.eq("WARNING:autotest.main.sub1.sub2:UNIT:logging_handlers.sub_tester.<locals>.sub2_test", loglines[2])
+            self_test.eq("TEST:autotest.main.sub1:UNIT:logging_handlers.sub_tester.<locals>.sub1_test", loglines[0])
+            self_test.eq("TEST:autotest.main:UNIT:logging_handlers.sub_tester.<locals>.main_test", loglines[1])
+            self_test.eq("TEST:autotest.main.sub1.sub2:UNIT:logging_handlers.sub_tester.<locals>.sub2_test", loglines[2])
 
 
     @self_test
@@ -446,7 +449,7 @@ class logging_handlers:
                     assert 1 == 2
             except AssertionError:
                 pass
-            self_test.eq("WARNING:autotest.main:UNIT:logging_handlers.tester_with_handler_failing.<locals>.a_failing_test\n", s.getvalue())
+            self_test.eq("TEST:autotest.main:UNIT:logging_handlers.tester_with_handler_failing.<locals>.a_failing_test\n", s.getvalue())
 
 
     @self_test

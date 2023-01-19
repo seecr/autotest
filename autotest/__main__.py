@@ -2,7 +2,7 @@
 #
 # "Autotest": a simpler test runner for python
 #
-# Copyright (C) 2022 Seecr (Seek You Too B.V.) https://seecr.nl
+# Copyright (C) 2022-2023 Seecr (Seek You Too B.V.) https://seecr.nl
 #
 # This file is part of "Autotest"
 #
@@ -93,7 +93,7 @@ if 'AUTOTEST_MAIN' not in os.environ:
     if len(args) == 1:
         p = pathlib.Path(args[0])
         modulename = '.'.join(p.parent.parts + (p.stem,))
-        logging.getLogger('autotest').warning(f"importing {modulename}")
+        logging.getLogger('autotest').log(autotest.tester.default_loglevel, f"importing {modulename}")
         importlib.import_module(modulename)
         root.log_stats()
     else:

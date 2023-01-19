@@ -2,7 +2,7 @@
 #
 # "Autotest": a simpler test runner for python
 #
-# Copyright (C) 2022 Seecr (Seek You Too B.V.) https://seecr.nl
+# Copyright (C) 2022-2023 Seecr (Seek You Too B.V.) https://seecr.nl
 #
 # This file is part of "Autotest"
 #
@@ -61,7 +61,7 @@ def integration_test(test):
     def import_submodule(stdout, stderr):
         from autotest.tests.sub_module_ok import marker
         test.eq("TESTER: <Tester 'autotest.tests.sub_module_ok'>\n", stdout.getvalue())
-        test.eq('test_one\n', stderr.getvalue())
+        test.eq('UNIT:test_one\n', stderr.getvalue())
 
 
     try:
@@ -73,7 +73,7 @@ def integration_test(test):
     except AssertionError as e:
         test.eq("fail I will", str(e))
         m = r.getvalue()
-        test.eq(m, "integration_test.<locals>.import_submodule_failure\ntiedeldom\n")
+        test.eq(m, "INTEGRATION:integration_test.<locals>.import_submodule_failure\nUNIT:tiedeldom\n")
 
 
 
