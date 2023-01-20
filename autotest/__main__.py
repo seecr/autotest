@@ -86,7 +86,10 @@ if 'AUTOTEST_MAIN' not in os.environ:
     autotest.basic_config(**test_options)
 
 
-    logging.basicConfig(style='{', format="{levelname}:{name}:\033[1m{message}\033[0m:{pathname}:{lineno}")
+    class F(str):
+        def format(self, *, levelname='', message='', lineno='', pathname='', **rest):
+            return f"{levelname}:\033[1m{message}\033[0m:{pathname[-40:]}:{lineno}"
+    logging.basicConfig(style='{', format=F('{fake}'))
 
 
     root = autotest.get_tester()

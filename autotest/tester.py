@@ -140,16 +140,16 @@ class Tester:
 
 
     def _logtest(self, f, msg):
-        name = f"{logger.name}.{self._name}" if self._name else logger.name
+        loggername = f"{logger.name}.{self._name}" if self._name else logger.name
         record = logging.LogRecord(
-            name,                                     # name of logger
+            loggername,                               # name of logger
             self.option_get('loglevel', default_loglevel), # level under which test messages get logged
             f.__code__.co_filename if f else None,    # source file where test is
             f.__code__.co_firstlineno if f else None, # line where test is
             msg,                                      # message
             (),                                       # args (passed to message.format)
             None,                                     # exc_info
-            f.__name__ if f else None,                # name of the function invoking test.<op>
+            f.__qualname__ if f else None,            # name of the function invoking test.<op>
             None                                      # text representation of stack
             )
         for hook in self.all_hooks():
@@ -179,7 +179,7 @@ class Tester:
 
     def log_stats(self):
         name = self._name + '.stats: ' if self._name else 'stats: '
-        self._logtest(None, name + ', '.join(f'{k}: {v}' for k, v in self.stats.most_common()))
+        logger.log(self.option_get('loglevel', default_loglevel), name + ', '.join(f'{k}: {v}' for k, v in self.stats.most_common()))
 
 
     def __getattr__(self, name):
@@ -364,7 +364,7 @@ class logging_handlers:
             @tester
             def my_output_goes_to_root_logger():
                 assert 1 == 1 # hooks for operators not present
-            self_test.eq('my_output_goes_to_root_logger', i[0].funcName)
+            self_test.eq('logging_handlers.tester_delegates_to_root_logger.<locals>.my_output_goes_to_root_logger', i[0].funcName)
 
 
     @self_test
@@ -379,7 +379,7 @@ class logging_handlers:
             self_test.lt(1673605231.8793523, records[0].created)
             self_test.eq(None, records[0].exc_info)
             self_test.eq('tester.py', records[0].filename)
-            self_test.eq('a_test', records[0].funcName)
+            self_test.eq('logging_handlers.logrecords_contents.<locals>.a_test', records[0].funcName)
             self_test.eq('TEST', records[0].levelname)
             self_test.eq(33, records[0].levelno)
             self_test.eq(_line_+1, records[0].lineno)

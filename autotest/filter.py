@@ -22,10 +22,21 @@
 ## end license ##
 
 
-def filter_hook(runner, func):
-    f = runner.option_get('filter', '')
-    if f in func.__qualname__:
-        return func
+def fullname(func):
+    return f"{func.__module__}.{func.__qualname__}".replace('.<locals>', '')
+
+
+class FilterHook:
+    def __call__(self, runner, func):
+        f = runner.option_get('filter', '')
+        if f in fullname(func):
+            return func
+
+    def logrecord(self, runner, func, record):
+        record.msg = fullname(func)
+        return record
+
+filter_hook = FilterHook()
 
 
 def filter_test(self_test):
@@ -49,3 +60,23 @@ def filter_test(self_test):
                         r[2] = 1
             assert r == [0, 1, 1], r
         assert {'found': 3, 'run': 2} == with_noot.stats, with_noot.stats
+
+    @my_test
+    def remove_locals():
+        r = [0]
+        @my_test(filter='remove_locals.vuur')
+        def vuur():
+            r[0] = 1
+        assert r == [1], r
+
+    @my_test
+    def filter_on_module():
+        r = [0]
+        @my_test(filter='autotest.filter.filter_test.filter_on_module.boom')
+        def boom():
+            r[0] = 1
+        assert r == [1], r
+
+
+
+

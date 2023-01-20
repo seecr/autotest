@@ -61,7 +61,7 @@ def integration_test(test):
     def import_submodule(stdout, stderr):
         from autotest.tests.sub_module_ok import marker
         test.eq("TESTER: <Tester 'autotest.tests.sub_module_ok'>\n", stdout.getvalue())
-        test.eq('UNIT:test_one\n', stderr.getvalue())
+        test.eq('UNIT:autotest.tests.sub_module_ok.test_one\n', stderr.getvalue())
 
 
     try:
@@ -73,7 +73,7 @@ def integration_test(test):
     except AssertionError as e:
         test.eq("fail I will", str(e))
         m = r.getvalue()
-        test.eq(m, "INTEGRATION:integration_test.<locals>.import_submodule_failure\nUNIT:tiedeldom\n")
+        test.eq(m, "INTEGRATION:autotest.integrationtests.integration_test.import_submodule_failure\nUNIT:autotest.tests.sub_module_fail.tiedeldom\n")
 
 
 
@@ -87,7 +87,7 @@ def integration_test(test):
     @test(bind=True)
     def by_default_do_not_run_in_spawned_processes(stdout, stderr):
         spawn(subprocess).join()
-        test.contains(stderr.getvalue(), 'subprocess.<locals>.one_does_run')
+        test.contains(stderr.getvalue(), 'subprocess.one_does_run')
         test.eq('In any child, I run.\n', stdout.getvalue())
 
 
