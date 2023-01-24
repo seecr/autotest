@@ -50,7 +50,10 @@ def async_hook(runner, func):
                     raise TimeoutError(func.__name__) from None
             try:
                 asyncio.get_running_loop()
+                loop=True
             except RuntimeError as e:
+                loop=False # avoid this exception to be reported
+            if not loop:
                 asyncio.run(with_options(), debug=runner.option_get('debug', True))
             else:
                 thread(
