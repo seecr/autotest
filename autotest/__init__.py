@@ -385,7 +385,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         assert "autotest/tests/tryout.py" in loglines[-3]
         assert "assert 1 == 2" in loglines[-2]
         assert "AssertionError: one is not two" in loglines[-1], loglines[-1]
-        assert 30 == len(loglines), '\n'.join(repr(l) for l in loglines)
+        assert 23 == len(loglines), '\n'.join(repr(l) for l in loglines)
 
 
     #@self_test2
