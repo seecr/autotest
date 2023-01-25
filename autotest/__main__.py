@@ -88,6 +88,7 @@ if 'AUTOTEST_MAIN' not in os.environ:
 
     class F(str):
         def format(self, *, levelname='', message='', lineno='', pathname='', **rest):
+            levelname = '\033[1mTEST\033[0m' if levelname == 'TEST' else levelname
             return f"{levelname}:\033[1m{message}\033[0m:{pathname[-40:]}:{lineno}"
     logging.basicConfig(style='{', format=F('{fake}'))
 

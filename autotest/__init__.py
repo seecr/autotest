@@ -364,9 +364,9 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         assert '' == s, s
         loglines = e.splitlines()
         assert 'importing autotest.tests.tryout' in loglines[0], loglines[0]
-        assert loglines[1].startswith("TEST:\033[1mUNIT:autotest.tests.tryout.one_simple_test\033[0m:"), loglines[1]
+        assert loglines[1].startswith("\033[1mTEST\033[0m:\033[1mUNIT:autotest.tests.tryout.one_simple_test\033[0m:"), loglines[1]
         assert loglines[1].endswith("/autotest/autotest/tests/tryout.py:28"), loglines[1]
-        assert loglines[2].startswith("TEST:\033[1mINTEGRATION:autotest.tests.tryout.one_more_test\033[0m:"), loglines[2]
+        assert loglines[2].startswith("\033[1mTEST\033[0m:\033[1mINTEGRATION:autotest.tests.tryout.one_more_test\033[0m:"), loglines[2]
         assert loglines[2].endswith("/autotest/autotest/tests/tryout.py:32"), loglines[2]
         assert " 29  \tdef one_simple_test():" == loglines[3]
         assert " 30  \t    test.eq(1, 1)" == loglines[4]
@@ -401,10 +401,10 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         o = stdout.getvalue()
         self_test2.eq('', o)
         lines = stderr.getvalue().splitlines()
-        self_test2.startswith(lines[0], "TEST:\033[1mimporting autotest.tests.tryout2\033[0m:")
-        self_test2.startswith(lines[1], "TEST:\033[1mUNIT:autotest.tests.tryout2.one_simple_test\033[0m:")
-        self_test2.startswith(lines[2], "TEST:\033[1mINTEGRATION:autotest.tests.tryout2.one_integration_test\033[0m:")
-        self_test2.startswith(lines[3], "TEST:\033[1mstats: found: 3, run: 2\033[0m:")
+        self_test2.startswith(lines[0], "\033[1mTEST\033[0m:\033[1mimporting autotest.tests.tryout2\033[0m:")
+        self_test2.startswith(lines[1], "\033[1mTEST\033[0m:\033[1mUNIT:autotest.tests.tryout2.one_simple_test\033[0m:")
+        self_test2.startswith(lines[2], "\033[1mTEST\033[0m:\033[1mINTEGRATION:autotest.tests.tryout2.one_integration_test\033[0m:")
+        self_test2.startswith(lines[3], "\033[1mTEST\033[0m:\033[1mstats: found: 3, run: 2\033[0m:")
 
 
     @self_test2

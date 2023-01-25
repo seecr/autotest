@@ -2,7 +2,7 @@
 #
 # "Autotest": a simpler test runner for python
 #
-# Copyright (C) 2022 Seecr (Seek You Too B.V.) https://seecr.nl
+# Copyright (C) 2022-2023 Seecr (Seek You Too B.V.) https://seecr.nl
 #
 # This file is part of "Autotest"
 #
