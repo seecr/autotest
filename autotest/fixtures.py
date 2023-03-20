@@ -197,7 +197,17 @@ def raises(exception=Exception, message=None):
         raise e
 
 
-std_fixtures = {fx.__name__: fx for fx in [tmp_path, stdout, stderr, raises]}
+def guard():
+    keep_sys_path = sys.path.copy()
+    keep_meta_path = sys.meta_path.copy()
+    keep_modules = sys.modules.copy()
+    yield
+    assert keep_sys_path == sys.path, f"sys.path contaminated: {set(keep_sys_path) ^ set(sys.path)}"
+    assert keep_meta_path == sys.meta_path, f"sys.meta_path contaminated: {set(keep_meta_path) ^ set(sys.meta_path)}"
+    assert keep_modules == sys.modules, f"sys.modules contaminated: {keep_modules.keys() ^ sys.modules.keys()}"
+
+
+std_fixtures = {fx.__name__: fx for fx in [tmp_path, stdout, stderr, raises, guard]}
 
 
 def fixtures_test(self_test):
@@ -568,3 +578,38 @@ def fixtures_test(self_test):
         """ implicit fixture test """
         assert test.option_get('my_option') == 56
 
+
+    @self_test
+    def guard_sys_path(tmp_path):
+        try:
+            with self_test.guard as p:
+                sys.path.append(tmp_path)
+            self.fail()
+        except AssertionError as e:
+            self_test.eq(f"sys.path contaminated: {{{tmp_path!r}}}", e.args[0])
+        p = sys.path.pop()
+        assert p == tmp_path
+
+
+    @self_test
+    def guard_meta_path():
+        try:
+            with self_test.guard as p:
+                sys.meta_path.append("does not work")
+            self.fail()
+        except AssertionError as e:
+            self_test.eq(f"sys.meta_path contaminated: {{'does not work'}}", e.args[0])
+        p = sys.meta_path.pop()
+        assert p == "does not work"
+
+
+    @self_test
+    def guard_modules():
+        try:
+            with self_test.guard as p:
+                sys.modules['this_is_a_module'] = "not a module"
+            self.fail()
+        except AssertionError as e:
+            self_test.eq(f"sys.modules contaminated: {{'this_is_a_module'}}", e.args[0])
+        p = sys.modules.pop('this_is_a_module')
+        assert p == "not a module"

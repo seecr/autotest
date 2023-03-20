@@ -109,6 +109,9 @@ class Tester:
             self._options = collections.ChainMap(options, defaults)
         self.stats = collections.Counter(found=0, run=0)
         self._loghandlers = []
+        self._keep_path = sys.path.copy()
+        self._keep_meta = sys.meta_path.copy()
+        self._keep_mods = sys.modules.copy()
 
 
     def option_get(self, name, default=None):
