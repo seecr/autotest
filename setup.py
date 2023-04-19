@@ -27,27 +27,26 @@ import pathlib
 
 here = pathlib.Path(__file__).parent.resolve()
 
-long_description = (here/"README.rst").read_text(encoding="utf-8")
+long_description = (here / "README.rst").read_text(encoding="utf-8")
 
-version='0.2.0'
+version = "0.2.0"
 
 setup(
-    name='autotest',
+    name="autotest",
     version=version,
-    description='Python Testing Library',
+    description="Python Testing Library",
     long_description=long_description,
-    long_description_content_type='text/x-rst',
+    long_description_content_type="text/x-rst",
     packages=find_packages(),
-    author='Erik Groeneveld',
-    author_email='erik@seecr.nl',
-    url='https://github.com/seecr/autotest',
+    author="Erik Groeneveld",
+    author_email="erik@seecr.nl",
+    url="https://github.com/seecr/autotest",
     scripts=["bin/autotest"],
     classifiers=[
-        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
-        'Topic :: Software Development :: Testing',
-        'Topic :: Software Development :: Testing :: Unit',
-        'Programming Language :: Python :: 3',
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        "Topic :: Software Development :: Testing",
+        "Topic :: Software Development :: Testing :: Unit",
+        "Programming Language :: Python :: 3",
     ],
-    python_requires='>=3.9',
+    python_requires=">=3.9",
 )
-

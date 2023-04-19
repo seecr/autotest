@@ -40,38 +40,41 @@ def async_hook(runner, func):
         AUTOTEST_INTERNAL = 1
         coro_or_result = func(*a, **k)
         if inspect.iscoroutine(coro_or_result):
+
             async def with_options():
                 AUTOTEST_INTERNAL = 1
                 try:
-                    if scbd := runner.option_get('slow_callback_duration'):
+                    if scbd := runner.option_get("slow_callback_duration"):
                         asyncio.get_running_loop().slow_callback_duration = scbd
-                    await asyncio.wait_for(asyncio.shield(coro_or_result), runner.option_get('timeout', 1))
+                    await asyncio.wait_for(
+                        asyncio.shield(coro_or_result), runner.option_get("timeout", 1)
+                    )
                 except asyncio.TimeoutError as e:
                     raise TimeoutError(func.__name__) from None
+
             try:
                 asyncio.get_running_loop()
-                loop=True
+                loop = True
             except RuntimeError as e:
-                loop=False # avoid this exception to be reported
+                loop = False  # avoid this exception to be reported
             if not loop:
-                asyncio.run(with_options(), debug=runner.option_get('debug', True))
+                asyncio.run(with_options(), debug=runner.option_get("debug", True))
             else:
                 thread(
-                    asyncio.run,
-                    with_options(),
-                    debug=runner.option_get('debug', True)
-                    ).result()
+                    asyncio.run, with_options(), debug=runner.option_get("debug", True)
+                ).result()
         else:
             return coro_or_result
+
     return may_be_async
 
 
 def async_test(self_test):
     import threading
+
     main = threading.current_thread()
     with self_test.child(hooks=(async_hook,)) as atest:
-
-        atest.eq({'found': 0, 'run': 0}, atest.stats)
+        atest.eq({"found": 0, "run": 0}, atest.stats)
         loops = [None, None, None, None]
         threads = [None, None, None, None]
 
@@ -84,10 +87,12 @@ def async_test(self_test):
         async def parent():
             loops[1] = asyncio.get_running_loop()
             threads[1] = threading.current_thread()
+
             @atest
             async def nested_async_test():
                 loops[2] = asyncio.get_running_loop()
                 threads[2] = threading.current_thread()
+
             @atest
             def nested_sync_test():
                 loops[3] = asyncio.get_running_loop()
@@ -97,61 +102,69 @@ def async_test(self_test):
             assert threads[1] == main
             assert threads[2] != main
             assert threads[3] == main
-            assert len(loops) ==  4
+            assert len(loops) == 4
             assert loops[0]
             assert loops[1]
             assert loops[1] != loops[0]
             assert loops[2]
-            assert loops[2] != loops[0] # each async test has own loop
+            assert loops[2] != loops[0]  # each async test has own loop
             assert loops[2] != loops[1]
-            assert loops[3] == loops[1] # still same loop
-
+            assert loops[3] == loops[1]  # still same loop
 
         try:
+
             @atest
             async def with_failures():
-                assert 1 == 2, '1 is not 2'
+                assert 1 == 2, "1 is not 2"
                 raise Exception
-        except AssertionError as e:
-            assert str(e) == '1 is not 2', e
 
+        except AssertionError as e:
+            assert str(e) == "1 is not 2", e
 
         try:
+
             @atest(timeout=0.05)
             async def async_timeout_raises_standard_TimeoutError():
                 await asyncio.sleep(0.10)
                 assert False, "should have raised timeout"
+
         except TimeoutError as e:
             assert "async_timeout_raises_standard_TimeoutError" == str(e)
 
-
         import sys, io, time
+
         try:
             sys.stderr = io.StringIO()
             sys.stdout = io.StringIO()
+
             @atest
             async def debug_warnings_on_by_default():
                 asyncio.get_running_loop().call_soon(time.sleep, 0.11)
+
             e = sys.stderr.getvalue()
             s = sys.stdout.getvalue()
+
             @atest
             def asserts():
-                assert '' == s, s
+                assert "" == s, s
                 assert "Executing <Handle sleep(0.11) created at" in e, e
                 assert "took 0.110 seconds" in e, e
+
         finally:
             sys.stderr = sys.__stderr__
             sys.stdout = sys.__stdout__
 
-
         try:
             sys.stderr = io.StringIO()
+
             @atest(keep=True)
             async def default_slow_callback_duration():
                 assert asyncio.get_running_loop().slow_callback_duration == 0.1
+
             @atest(slow_callback_duration=0.12)
             async def slow_callback_duration_option():
                 asyncio.get_running_loop().call_soon(time.sleep, 0.11)
+
             atest(default_slow_callback_duration)
             s = sys.stderr.getvalue()
             assert "Executing <Handle sleep(0.11) created at" not in s, s
@@ -159,7 +172,6 @@ def async_test(self_test):
         finally:
             sys.stderr = sys.__stderr__
 
-
         @atest
         def assert_stats():
-            atest.eq({'found': 12, 'run': 12}, atest.stats)
+            atest.eq({"found": 12, "run": 12}, atest.stats)

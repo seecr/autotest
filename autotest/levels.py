@@ -42,24 +42,24 @@ import logging
     can raise the threshold in order to exclude tests.
 """
 
-CRITICAL    = 50
-UNIT        = 40
+CRITICAL = 50
+UNIT = 40
 INTEGRATION = 30
 PERFORMANCE = 20
-NOTSET      =  0
+NOTSET = 0
 
 
 levels = {
-    'CRITICAL':     CRITICAL,
-    'UNIT':         UNIT,
-    'INTEGRATION':  INTEGRATION,
-    'PERFORMANCE':  PERFORMANCE,
-    'NOTSET':       NOTSET,
-    CRITICAL:       'CRITICAL',
-    UNIT:           'UNIT',
-    INTEGRATION:    'INTEGRATION',
-    PERFORMANCE:    'PERFORMANCE',
-    NOTSET:         'NOTSET',
+    "CRITICAL": CRITICAL,
+    "UNIT": UNIT,
+    "INTEGRATION": INTEGRATION,
+    "PERFORMANCE": PERFORMANCE,
+    "NOTSET": NOTSET,
+    CRITICAL: "CRITICAL",
+    UNIT: "UNIT",
+    INTEGRATION: "INTEGRATION",
+    PERFORMANCE: "PERFORMANCE",
+    NOTSET: "NOTSET",
 }
 
 DEFAULT_LEVEL = UNIT
@@ -71,16 +71,18 @@ def numeric_level(l):
 
 
 class _Levels:
-
     def __call__(self, tester, func):
         if tester.level >= tester.threshold:
             return func
 
     def lookup(self, tester, name):
-        if name == 'level':
+        if name == "level":
             return numeric_level(tester.option_get(name, DEFAULT_LEVEL))
-        if name == 'threshold':
-            return max((numeric_level(l) for l in tester.option_enumerate('threshold')), default=DEFAULT_THRESHOLD)
+        if name == "threshold":
+            return max(
+                (numeric_level(l) for l in tester.option_enumerate("threshold")),
+                default=DEFAULT_THRESHOLD,
+            )
         if (level := levels.get(name.upper())) is not None:
             return tester(level=level)
         raise AttributeError
@@ -100,56 +102,77 @@ levels_hook = _Levels()
 def levels_test(self_test):
     def run_various_tests(test):
         runs = [0, 0, 0, 0, 0, 0]
+
         @test.critical
         def a_critial_test():
             runs[0] = 1
+
         @test.unit
         def a_unit_test():
             runs[1] = 1
+
         @test.integration
         def a_integration_test():
             runs[2] = 1
+
         @test.performance
         def a_performance_test():
             runs[3] = 1
+
         @test.notset
         def a_notset_test():
             runs[4] = 1
+
         @test
         def a_default_test():
             runs[5] = 1
+
         return runs
 
     @self_test
     def probe_various_levels_and_thresholds():
-        with self_test.child(hooks=(levels_hook,), level='unit', threshold='critical') as test:
+        with self_test.child(
+            hooks=(levels_hook,), level="unit", threshold="critical"
+        ) as test:
             r = run_various_tests(test)
             assert [1, 0, 0, 0, 0, 0] == r, r
 
-        with self_test.child(hooks=(levels_hook,), level='notset', threshold='unit') as test:
+        with self_test.child(
+            hooks=(levels_hook,), level="notset", threshold="unit"
+        ) as test:
             r = run_various_tests(test)
             assert [1, 1, 0, 0, 0, 0] == r, r
 
-        with self_test.child(hooks=(levels_hook,), level='performance', threshold='integration') as test:
+        with self_test.child(
+            hooks=(levels_hook,), level="performance", threshold="integration"
+        ) as test:
             r = run_various_tests(test)
             assert [1, 1, 1, 0, 0, 0] == r, r
 
-        with self_test.child(hooks=(levels_hook,), level='integration', threshold='performance') as test:
+        with self_test.child(
+            hooks=(levels_hook,), level="integration", threshold="performance"
+        ) as test:
             r = run_various_tests(test)
             assert [1, 1, 1, 1, 0, 1] == r, r
 
-        with self_test.child(hooks=(levels_hook,), level='critical', threshold='notset') as test:
+        with self_test.child(
+            hooks=(levels_hook,), level="critical", threshold="notset"
+        ) as test:
             r = run_various_tests(test)
             assert [1, 1, 1, 1, 1, 1] == r, r
 
-
-        with self_test.child(hooks=(levels_hook,), level='unit', threshold='integration') as test:
+        with self_test.child(
+            hooks=(levels_hook,), level="unit", threshold="integration"
+        ) as test:
             r = run_various_tests(test)
             assert [1, 1, 1, 0, 0, 1] == r, r
-            with test.child(level='performance', threshold='notset') as test2: # threshold ignored
+            with test.child(
+                level="performance", threshold="notset"
+            ) as test2:  # threshold ignored
                 r = run_various_tests(test2)
                 assert [1, 1, 1, 0, 0, 0] == r, r
-            with test.child(level='integration', threshold='performance') as test2: # threshold ignored
+            with test.child(
+                level="integration", threshold="performance"
+            ) as test2:  # threshold ignored
                 r = run_various_tests(test2)
                 assert [1, 1, 1, 0, 0, 1] == r, r
-

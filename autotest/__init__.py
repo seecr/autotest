@@ -45,49 +45,59 @@ import os
 
 
 from .tester import Tester, self_test
+
+
 @self_test
 def assert_stats():
-    assert {'found': 21, 'run': 20} == self_test.stats, self_test.stats
+    assert {"found": 21, "run": 20} == self_test.stats, self_test.stats
 
 
 from .levels import levels_hook, levels_test
+
 levels_test(self_test)
 
 from .prrint import prrint_test
+
 prrint_test(self_test)
 
 from .filter import filter_hook, filter_test
+
 filter_test(self_test)
 
 from .wildcard import wildcard_hook, wildcard_test
+
 wildcard_test(self_test)
 
 from .binder import binder_hook, binder_test
+
 binder_test(self_test)
 
 from .operators import operators_hook, operators_test
+
 operators_test(self_test)
 
 from .fixtures import fixtures_hook, fixtures_test, std_fixtures
+
 fixtures_test(self_test)
 
 from .asyncer import async_hook, async_test
+
 async_test(self_test)
 
 from .diffs import diff_hook, diff_test
-diff_test(self_test)
 
+diff_test(self_test)
 
 
 @self_test
 def check_stats():
-    self_test.eq({'found': 155, 'run': 129}, self_test.stats)
+    self_test.eq({"found": 155, "run": 129}, self_test.stats)
 
 
 def assemble_root_runner(**options):
     return Tester(
         # order of hook matters, processed from right to left
-        hooks = [
+        hooks=[
             operators_hook,
             async_hook,
             fixtures_hook,
@@ -95,15 +105,15 @@ def assemble_root_runner(**options):
             levels_hook,
             wildcard_hook,
             binder_hook,
-            filter_hook
-            ],
-        fixtures = std_fixtures,
+            filter_hook,
+        ],
+        fixtures=std_fixtures,
         **options,
     )
 
 
 def root_tester_assembly_test(test):
-    """ only test if the root tester is assembled with all hooks """
+    """only test if the root tester is assembled with all hooks"""
 
     N = [0]
 
@@ -116,10 +126,12 @@ def root_tester_assembly_test(test):
     @test.fixture
     def forty_two():
         yield 42
+
     @test
     def is_forty_two(forty_two):
         assert forty_two == 42
         N[0] += 1
+
     with test.forty_two as contextmanager:
         assert contextmanager == 42
 
@@ -128,15 +140,17 @@ def root_tester_assembly_test(test):
         test.truth(p.exists())
     with test.stdout as e:
         print("one")
-        assert e.getvalue() == 'one\n'
+        assert e.getvalue() == "one\n"
     with test.stderr as e:
         import sys
+
         print("two", file=sys.stderr)
-        assert e.getvalue() == 'two\n'
+        assert e.getvalue() == "two\n"
 
     # binding hook
     class A:
         a = 42
+
         @test(bind=True)
         def bind():
             assert a == 42
@@ -147,32 +161,49 @@ def root_tester_assembly_test(test):
 
     # levels hook
     from .levels import UNIT
+
     assert test.level == 40, test.level
     assert test.threshold == 30, test.threshold
     with test.child(threshold=UNIT) as tst:
+
         @tst.performance
         def performance_test():
             assert "not" == "executed"
+
         @tst.critical
         def critical_test():
             assert 1 == 1
             N[0] += 1
-        assert {'found': 2, 'run': 1} == tst.stats, tst.stats
+
+        assert {"found": 2, "run": 1} == tst.stats, tst.stats
 
     # async hook (elaborate on nested stuff)
     @test.fixture
     async def nine():
-        yield ['borg 1', 'borg 2', 'borg 3', 'borg 4', 'borg 5', 'borg 6', 'Annika Hansen', 'borg 8', 'borg 9']
+        yield [
+            "borg 1",
+            "borg 2",
+            "borg 3",
+            "borg 4",
+            "borg 5",
+            "borg 6",
+            "Annika Hansen",
+            "borg 8",
+            "borg 9",
+        ]
+
     @test.fixture
     async def seven_of_nine(nine):
-        yield nine[7-1]
+        yield nine[7 - 1]
+
     @test
     async def the_9(nine):
         assert len(nine) == 9
         N[0] += 1
+
     @test
     async def is_seven_of_nine(seven_of_nine):
-        assert seven_of_nine == 'Annika Hansen'
+        assert seven_of_nine == "Annika Hansen"
         N[0] += 1
 
     assert N[0] == 5, N
@@ -182,28 +213,31 @@ def root_tester_assembly_test(test):
     try:
         test.eq(1, 2, diff=test.diff)
     except AssertionError as e:
-        assert str(e) == '\n- 1\n+ 2'
+        assert str(e) == "\n- 1\n+ 2"
     try:
         test.eq(1, 2, diff=test.diff2)
     except AssertionError as e:
-        assert str(e) == '\n- 1\n+ 2'
+        assert str(e) == "\n- 1\n+ 2"
 
     # filter hook
-    @test(filter='aa')
+    @test(filter="aa")
     def moon():
         test.fail()
+
     r = [0]
-    @test(filter='aa')
+
+    @test(filter="aa")
     def maan():
         r[0] = 1
+
     assert r == [1]
 
 
-testers = {} # initial, for more testing
+testers = {}  # initial, for more testing
 
 
 def basic_config(**options):
-    #raise Exception
+    # raise Exception
     assert None not in testers, testers
     testers[None] = assemble_root_runner(**options)
 
@@ -214,7 +248,7 @@ def get_tester(name=None):
     if name in testers:
         return testers[name]
     tester = testers[None]
-    for namepart in name.split('.'):
+    for namepart in name.split("."):
         tester = tester.getChild(namepart)
         testers[tester._name] = tester
     return tester
@@ -222,10 +256,13 @@ def get_tester(name=None):
 
 @self_test
 def set_root_opts():
-    basic_config(filter='aap')
+    basic_config(filter="aap")
     root = get_tester()
-    self_test.eq({'filter', 'fixtures', 'hooks', 'keep', 'run', 'subprocess'}, set(root._options.keys()))
-    self_test.eq('aap', root._options['filter'])
+    self_test.eq(
+        {"filter", "fixtures", "hooks", "keep", "run", "subprocess"},
+        set(root._options.keys()),
+    )
+    self_test.eq("aap", root._options["filter"])
 
 
 @self_test
@@ -239,13 +276,13 @@ def get_root_tester():
 @self_test
 def get_sub_tester():
     root = get_tester()
-    mymodule = get_tester('my.module')
-    assert mymodule._name == 'my.module'
-    my = get_tester('my')
-    assert my._name == 'my'
+    mymodule = get_tester("my.module")
+    assert mymodule._name == "my.module"
+    my = get_tester("my")
+    assert my._name == "my"
     assert my._parent is root
     assert mymodule._parent is my
-    mymodule1 = get_tester('my.module')
+    mymodule1 = get_tester("my.module")
     assert mymodule1 is mymodule
 
 
@@ -256,6 +293,7 @@ testers.clear()
 def run_integration_tests():
     root_tester_assembly_test(assemble_root_runner())
     from .integrationtests import integration_test
+
     integration_test(assemble_root_runner().integration)
 
 
@@ -266,65 +304,74 @@ testers.clear()
 def setup_correct():
     import tempfile
     import pathlib
+
     with tempfile.TemporaryDirectory() as p:
         tmp = pathlib.Path(p)
         autotest_dev_dir = pathlib.Path(__file__).parent.resolve().parent
-        if not (autotest_dev_dir/'bin/autotest').exists():
+        if not (autotest_dev_dir / "bin/autotest").exists():
             # Not dev dir
             return
         import subprocess
-        version_process = subprocess.run(['python3', 'setup.py', '--version'],
-                capture_output=True,
-                text=True,
-                cwd=str(autotest_dev_dir),
-            )
+
+        version_process = subprocess.run(
+            ["python3", "setup.py", "--version"],
+            capture_output=True,
+            text=True,
+            cwd=str(autotest_dev_dir),
+        )
         version = version_process.stdout.strip()
-        result = subprocess.run(['python3', 'setup.py', 'sdist', '--dist-dir', str(tmp)],
-                capture_output=True,
-                cwd=str(autotest_dev_dir))
+        result = subprocess.run(
+            ["python3", "setup.py", "sdist", "--dist-dir", str(tmp)],
+            capture_output=True,
+            cwd=str(autotest_dev_dir),
+        )
 
         from tarfile import open
-        tf = open(name=tmp/f'autotest-{version}.tar.gz', mode='r:gz')
-        self_test.eq([
-             f'autotest-{version}',
-             f'autotest-{version}/LICENSE',
-             f'autotest-{version}/MANIFEST.in',
-             f'autotest-{version}/PKG-INFO',
-             f'autotest-{version}/README.rst',
-             f'autotest-{version}/autotest',
-             f'autotest-{version}/autotest.egg-info',
-             f'autotest-{version}/autotest.egg-info/PKG-INFO',
-             f'autotest-{version}/autotest.egg-info/SOURCES.txt',
-             f'autotest-{version}/autotest.egg-info/dependency_links.txt',
-             f'autotest-{version}/autotest.egg-info/top_level.txt',
-             f'autotest-{version}/autotest/__init__.py',
-             f'autotest-{version}/autotest/__main__.py',
-             f'autotest-{version}/autotest/asyncer.py',
-             f'autotest-{version}/autotest/binder.py',
-             f'autotest-{version}/autotest/diffs.py',
-             f'autotest-{version}/autotest/filter.py',
-             f'autotest-{version}/autotest/fixtures.py',
-             f'autotest-{version}/autotest/integrationtests.py',
-             f'autotest-{version}/autotest/levels.py',
-             f'autotest-{version}/autotest/mocks.py',
-             f'autotest-{version}/autotest/operators.py',
-             f'autotest-{version}/autotest/prrint.py',
-             f'autotest-{version}/autotest/tester.py',
-             f'autotest-{version}/autotest/tests',
-             f'autotest-{version}/autotest/tests/__init__.py',
-             f'autotest-{version}/autotest/tests/sub_module_fail.py',
-             f'autotest-{version}/autotest/tests/sub_module_ok.py',
-             f'autotest-{version}/autotest/tests/temporary_class_namespace.py',
-             f'autotest-{version}/autotest/tests/tryout.py',
-             f'autotest-{version}/autotest/tests/tryout2.py',
-             f'autotest-{version}/autotest/utils.py',
-             f'autotest-{version}/autotest/wildcard.py',
-             f'autotest-{version}/bin',
-             f'autotest-{version}/bin/autotest',
-             f'autotest-{version}/setup.cfg',
-             f'autotest-{version}/setup.py',
+
+        tf = open(name=tmp / f"autotest-{version}.tar.gz", mode="r:gz")
+        self_test.eq(
+            [
+                f"autotest-{version}",
+                f"autotest-{version}/LICENSE",
+                f"autotest-{version}/MANIFEST.in",
+                f"autotest-{version}/PKG-INFO",
+                f"autotest-{version}/README.rst",
+                f"autotest-{version}/autotest",
+                f"autotest-{version}/autotest.egg-info",
+                f"autotest-{version}/autotest.egg-info/PKG-INFO",
+                f"autotest-{version}/autotest.egg-info/SOURCES.txt",
+                f"autotest-{version}/autotest.egg-info/dependency_links.txt",
+                f"autotest-{version}/autotest.egg-info/top_level.txt",
+                f"autotest-{version}/autotest/__init__.py",
+                f"autotest-{version}/autotest/__main__.py",
+                f"autotest-{version}/autotest/asyncer.py",
+                f"autotest-{version}/autotest/binder.py",
+                f"autotest-{version}/autotest/diffs.py",
+                f"autotest-{version}/autotest/filter.py",
+                f"autotest-{version}/autotest/fixtures.py",
+                f"autotest-{version}/autotest/integrationtests.py",
+                f"autotest-{version}/autotest/levels.py",
+                f"autotest-{version}/autotest/mocks.py",
+                f"autotest-{version}/autotest/operators.py",
+                f"autotest-{version}/autotest/prrint.py",
+                f"autotest-{version}/autotest/tester.py",
+                f"autotest-{version}/autotest/tests",
+                f"autotest-{version}/autotest/tests/__init__.py",
+                f"autotest-{version}/autotest/tests/sub_module_fail.py",
+                f"autotest-{version}/autotest/tests/sub_module_ok.py",
+                f"autotest-{version}/autotest/tests/temporary_class_namespace.py",
+                f"autotest-{version}/autotest/tests/tryout.py",
+                f"autotest-{version}/autotest/tests/tryout2.py",
+                f"autotest-{version}/autotest/utils.py",
+                f"autotest-{version}/autotest/wildcard.py",
+                f"autotest-{version}/bin",
+                f"autotest-{version}/bin/autotest",
+                f"autotest-{version}/setup.cfg",
+                f"autotest-{version}/setup.py",
             ],
-            sorted(tf.getnames()), diff=lambda a, b: set(a).symmetric_difference(set(b)))
+            sorted(tf.getnames()),
+            diff=lambda a, b: set(a).symmetric_difference(set(b)),
+        )
         tf.close()
 
 
@@ -335,12 +382,10 @@ to fail.
 
 with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2:
 
-
     @self_test2
     def main_without_args(stdout):
         os.system("PYTHONPATH=. python autotest")
         assert "Usage: autotest [options] module" in stdout.getvalue()
-
 
     @self_test2
     def main_without_help(stdout):
@@ -353,28 +398,31 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         assert "-t THRESHOLD, --threshold=THRESHOLD" in s
         assert "only run tests whose level is >= THRESHOLD" in s
 
-
-
     @self_test2
     def main_test(stderr, stdout):
         import os
+
         os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
         e = stderr.getvalue()
         s = stdout.getvalue()
-        assert '' == s, s
+        assert "" == s, s
         loglines = e.splitlines()
-        assert 'importing autotest.tests.tryout' in loglines[0], loglines[0]
-        assert loglines[1].startswith("\033[1mTEST\033[0m:\033[1mUNIT:autotest.tests.tryout.one_simple_test\033[0m:"), loglines[1]
-        assert loglines[1].endswith("/autotest/autotest/tests/tryout.py:28"), loglines[1]
-        assert loglines[2].startswith("\033[1mTEST\033[0m:\033[1mINTEGRATION:autotest.tests.tryout.one_more_test\033[0m:"), loglines[2]
-        assert loglines[2].endswith("/autotest/autotest/tests/tryout.py:32"), loglines[2]
-        assert " 29  \tdef one_simple_test():" == loglines[3]
-        assert " 30  \t    test.eq(1, 1)" == loglines[4]
-        assert " 31  \t" == loglines[5]
-        assert " 32  \t@test.integration" == loglines[6]
-        assert " 33  \tasync def one_more_test():" == loglines[7]
-        assert ' 34  ->\t    assert 1 == 2, "one is not two"' == loglines[8]
-        assert " 35  \t    test.eq(1, 2)" == loglines[9]
+        assert "importing autotest.tests.tryout" in loglines[0], loglines[0]
+        assert loglines[1].startswith(
+            "\033[1mTEST\033[0m:\033[1mUNIT:autotest.tests.tryout.one_simple_test\033[0m:"
+        ), loglines[1]
+        assert loglines[1].endswith("/autotest/autotest/tests/tryout.py:29"), loglines[ 1 ]
+        assert loglines[2].startswith(
+            "\033[1mTEST\033[0m:\033[1mINTEGRATION:autotest.tests.tryout.one_more_test\033[0m:"
+        ), loglines[2]
+        assert loglines[2].endswith("/autotest/autotest/tests/tryout.py:34"), loglines[ 2 ]
+        assert " 31  \t    test.eq(1, 1)" == loglines[3]
+        assert " 32  \t" == loglines[4]
+        assert " 33  \t" == loglines[5]
+        assert " 34  \t@test.integration" == loglines[6]
+        assert " 35  \tasync def one_more_test():" == loglines[7]
+        assert ' 36  ->\t    assert 1 == 2, "one is not two"' == loglines[8]
+        assert " 37  \t    test.eq(1, 2)" == loglines[9]
         assert "[EOF]" == loglines[10]
         assert "Traceback (most recent call last):" in loglines[11]
         # some stuff in between we can't get rid off
@@ -385,72 +433,81 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         assert "autotest/tests/tryout.py" in loglines[-3]
         assert "assert 1 == 2" in loglines[-2]
         assert "AssertionError: one is not two" in loglines[-1], loglines[-1]
-        assert 23 == len(loglines), '\n'.join(repr(l) for l in loglines)
+        assert 23 == len(loglines), "\n".join(repr(l) for l in loglines)
 
-
-    #@self_test2
+    # @self_test2
     def main_with_selftests(stdout, stderr):
         os.system("PYTHONPATH=. python autotest autotest.selftest")
         lns = stdout.getvalue().splitlines()
-        assert ['Usage: autotest [options] module', ''] == lns, lns
+        assert ["Usage: autotest [options] module", ""] == lns, lns
         lns = stderr.getvalue().splitlines()
-        assert len(lns) == 144, len(lns) # number of logged tests, sort of
-
+        assert len(lns) == 144, len(lns)  # number of logged tests, sort of
 
     def assert_output(stdout, stderr):
         o = stdout.getvalue()
-        self_test2.eq('', o)
+        self_test2.eq("", o)
         lines = stderr.getvalue().splitlines()
-        self_test2.startswith(lines[0], "\033[1mTEST\033[0m:\033[1mimporting autotest.tests.tryout2\033[0m:")
-        self_test2.startswith(lines[1], "\033[1mTEST\033[0m:\033[1mUNIT:autotest.tests.tryout2.one_simple_test\033[0m:")
-        self_test2.startswith(lines[2], "\033[1mTEST\033[0m:\033[1mINTEGRATION:autotest.tests.tryout2.one_integration_test\033[0m:")
-        self_test2.startswith(lines[3], "\033[1mTEST\033[0m:\033[1mstats: found: 3, run: 2\033[0m:")
-
+        self_test2.startswith(
+            lines[0],
+            "\033[1mTEST\033[0m:\033[1mimporting autotest.tests.tryout2\033[0m:",
+        )
+        self_test2.startswith(
+            lines[1],
+            "\033[1mTEST\033[0m:\033[1mUNIT:autotest.tests.tryout2.one_simple_test\033[0m:",
+        )
+        self_test2.startswith(
+            lines[2],
+            "\033[1mTEST\033[0m:\033[1mINTEGRATION:autotest.tests.tryout2.one_integration_test\033[0m:",
+        )
+        self_test2.startswith(
+            lines[3], "\033[1mTEST\033[0m:\033[1mstats: found: 3, run: 2\033[0m:"
+        )
 
     @self_test2
     def main_via_bin_script_with_autotest_on_path(stdout, stderr):
-        os.system(f'PATH=./bin:$PATH autotest autotest/tests/tryout2.py')
+        os.system(f"PATH=./bin:$PATH autotest autotest/tests/tryout2.py")
         assert_output(stdout, stderr)
-
 
     @self_test2
     def main_via_bin_script_in_cur_dir(stdout, stderr):
-        os.system(f'(cd bin; ./autotest autotest/tests/tryout2.py)')
+        os.system(f"(cd bin; ./autotest autotest/tests/tryout2.py)")
         assert_output(stdout, stderr)
-
 
     @self_test2
     def main_with_filter(stdout, stderr):
-        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --filter one_simple")
+        os.system(
+            "PYTHONPATH=. python autotest autotest/tests/tryout2.py --filter one_simple"
+        )
         o = stdout.getvalue()
-        assert '' == o, o
+        assert "" == o, o
         e = stderr.getvalue()
-        assert 'one_simple_test' in e, e
-        assert 'one_integration_test' not in e, e
-        assert 'one_performance_test' not in e
-        assert 'found: 3, run: 1' in e, e
-
+        assert "one_simple_test" in e, e
+        assert "one_integration_test" not in e, e
+        assert "one_performance_test" not in e
+        assert "found: 3, run: 1" in e, e
 
     @self_test2
     def main_with_level_unit(stdout, stderr):
-        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold unit")
+        os.system(
+            "PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold unit"
+        )
         o = stdout.getvalue()
-        assert '' == o, o
+        assert "" == o, o
         e = stderr.getvalue()
-        assert 'one_simple_test' in e, e
-        assert 'one_integration_test' not in e, e
-        assert 'one_performance_test' not in e
-        assert 'found: 3, run: 1' in e, e
-
+        assert "one_simple_test" in e, e
+        assert "one_integration_test" not in e, e
+        assert "one_performance_test" not in e
+        assert "found: 3, run: 1" in e, e
 
     @self_test2
     def main_with_level_integration(stdout, stderr):
-        os.system("PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold integration")
+        os.system(
+            "PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold integration"
+        )
         o = stdout.getvalue()
-        assert '' == o, o
+        assert "" == o, o
         e = stderr.getvalue()
-        assert 'one_simple_test' in e, e
-        assert 'one_integration_test' in e, e
-        assert 'one_performance_test' not in e
-        assert 'found: 3, run: 2' in e, e
-
+        assert "one_simple_test" in e, e
+        assert "one_integration_test" in e, e
+        assert "one_performance_test" not in e
+        assert "found: 3, run: 2" in e, e

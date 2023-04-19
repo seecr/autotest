@@ -34,45 +34,46 @@ import sys
 from io import StringIO
 from dataclasses import dataclass
 
-def _format(data, indent, seen=None, sep=','):
+
+def _format(data, indent, seen=None, sep=","):
     write = indent.write
     if id(data) in seen and isinstance(data, (list, dict, tuple, set)):
-        write('...', sep)
+        write("...", sep)
     else:
         seen.add(id(data))
         if isinstance(data, list):
             if data:
-                write('[')
+                write("[")
                 for v in data:
                     _format(v, indent(), seen)
-                write(']', sep)
+                write("]", sep)
             else:
-                write('[]', sep)
+                write("[]", sep)
         elif isinstance(data, dict):
             if data:
-                write('{')
+                write("{")
                 for k, v in sorted(data.items(), key=lambda item: str(item[0])):
-                    _format(k, indent(), seen, sep=':')
+                    _format(k, indent(), seen, sep=":")
                     _format(v, indent()(), seen)
-                write('}', sep)
+                write("}", sep)
             else:
-                write('{}', sep)
+                write("{}", sep)
         elif isinstance(data, tuple):
             if data:
-                write('(')
+                write("(")
                 for v in data:
                     _format(v, indent(), seen)
-                write(')', sep)
+                write(")", sep)
             else:
-                write('()', sep)
+                write("()", sep)
         elif isinstance(data, set):
             if data:
-                write('{')
+                write("{")
                 for v in sorted(data, key=str):
                     _format(v, indent(), seen)
-                write('}', sep)
+                write("}", sep)
             else:
-                write('set()', sep)
+                write("set()", sep)
         else:
             write(repr(data), sep)
 
@@ -88,28 +89,26 @@ class Indenter:
 
     def write(self, *data):
         write = self.out.write
-        write(self.i * ' ')
+        write(self.i * " ")
         for d in data:
             write(d)
-        write('\n')
+        write("\n")
 
 
 def format(data):
     out = StringIO()
-    _format(data, Indenter(out), seen=set(), sep='')
+    _format(data, Indenter(out), seen=set(), sep="")
     return out.getvalue()
 
 
 def prrint(data):
-    _format(data, Indenter(sys.stdout), seen=set(), sep='')
-
+    _format(data, Indenter(sys.stdout), seen=set(), sep="")
 
 
 def prrint_test(test):
     from .fixtures import fixtures_hook, stdout
-    test = test.getChild(
-            hooks=[fixtures_hook],
-            fixtures={'stdout': stdout})
+
+    test = test.getChild(hooks=[fixtures_hook], fixtures={"stdout": stdout})
 
     @test
     def empty():
@@ -119,26 +118,27 @@ def prrint_test(test):
         test.eq("()\n", format(()))
         test.eq("set()\n", format(set()))
 
-
     @test
     def one_element():
         test.eq("[\n  42,\n]\n", format([42]))
         test.eq(
-    """{
+            """{
   1:
     'a',
 }
-""", format({1: "a"}))
+""",
+            format({1: "a"}),
+        )
         test.eq("''\n", format(""))
         test.eq("(\n  42,\n)\n", format((42,)))
         test.eq("[\n  42,\n]\n", format([42]))
         test.eq("{\n  42,\n}\n", format({42}))
 
-
     @test
     def separators():
-        x = format([1, (2,), {3:3}, {4}, [5]])
-        test.eq("""[
+        x = format([1, (2,), {3: 3}, {4}, [5]])
+        test.eq(
+            """[
   1,
   (
     2,
@@ -154,42 +154,47 @@ def prrint_test(test):
     5,
   ],
 ]
-""", x)
-
+""",
+            x,
+        )
 
     @test
     def recursion():
         a = {1: None}
         a[1] = a
         x = format(a)
-        test.eq("""{
+        test.eq(
+            """{
   1:
     ...,
 }
-""", x)
-
+""",
+            x,
+        )
 
     @test
     def set_sorted():
         x = format({"noot", "mies", "aap"})
-        test.eq("""{
+        test.eq(
+            """{
   'aap',
   'mies',
   'noot',
 }
-""", x)
-
+""",
+            x,
+        )
 
     @test
     def set_sorted_uncomparables():
         x = format({str, dict, bool})
         test.eq("{\n  <class 'bool'>,\n  <class 'dict'>,\n  <class 'str'>,\n}\n", x)
 
-
     @test
     def dict_sorted():
         x = format({"noot": 3, "mies": 2, "aap": 1})
-        test.eq("""{
+        test.eq(
+            """{
   'aap':
     1,
   'mies':
@@ -197,19 +202,34 @@ def prrint_test(test):
   'noot':
     3,
 }
-""", x)
-
+""",
+            x,
+        )
 
     @test
     def dict_sorted_uncomparables():
         x = format({str: 2, dict: 1, bool: 3})
-        test.eq("{\n  <class 'bool'>:\n    3,\n  <class 'dict'>:\n    1,\n  <class 'str'>:\n    2,\n}\n", x)
-
+        test.eq(
+            "{\n  <class 'bool'>:\n    3,\n  <class 'dict'>:\n    1,\n  <class 'str'>:\n    2,\n}\n",
+            x,
+        )
 
     @test
     def beetje_echt():
-        x = format({'pred_a': [{'pred_b': [{'@value': "32", '@type': 'number'}, {'@value': "more", '@type':  "text"}]}]})
-        test.eq("""{
+        x = format(
+            {
+                "pred_a": [
+                    {
+                        "pred_b": [
+                            {"@value": "32", "@type": "number"},
+                            {"@value": "more", "@type": "text"},
+                        ]
+                    }
+                ]
+            }
+        )
+        test.eq(
+            """{
   'pred_a':
     [
       {
@@ -231,13 +251,15 @@ def prrint_test(test):
       },
     ],
 }
-""" , x)
-
+""",
+            x,
+        )
 
     @test
     def allez():
-        x = format({('aa', 'bb'): {('cc', ('dd',)): ('ee',)}, ('ff',): ()})
-        test.eq("""{
+        x = format({("aa", "bb"): {("cc", ("dd",)): ("ee",)}, ("ff",): ()})
+        test.eq(
+            """{
   (
     'aa',
     'bb',
@@ -258,42 +280,42 @@ def prrint_test(test):
   ):
     (),
 }
-""", x)
-
+""",
+            x,
+        )
 
     @test
     def very_long_string_uninterrupted():
         long_string = "aapnootmies" * 100
         x = format((long_string,))
-        test.eq(f"""(
+        test.eq(
+            f"""(
   '{long_string}',
 )
-""", x)
-
+""",
+            x,
+        )
 
     @test
     def via_stdout(stdout):
-        d = {'a': ('b', 42)}
+        d = {"a": ("b", 42)}
         f = format(d)
         prrint(d)
         test.eq(f, stdout.getvalue())
 
-
     def nndiff(a, b):
         import difflib
         import re
+
         r = re.compile("(\s*)(\S+)(\s*)")
-        al = [r.fullmatch(l).group(1,2,3) for l in a]
-        bl = [r.fullmatch(l).group(1,2,3) for l in b]
+        al = [r.fullmatch(l).group(1, 2, 3) for l in a]
+        bl = [r.fullmatch(l).group(1, 2, 3) for l in b]
         dl = difflib.ndiff([l[1] for l in al], [l[1] for l in bl])
         return dl
-
 
     @test
     def diff2_whitespace():
         a = [" a "]
         b = ["  a "]
         d = nndiff(a, b)
-        test.eq('  a', ''.join(d))
-
-
+        test.eq("  a", "".join(d))

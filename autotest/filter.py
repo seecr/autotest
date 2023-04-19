@@ -23,12 +23,12 @@
 
 
 def fullname(func):
-    return f"{func.__module__}.{func.__qualname__}".replace('.<locals>', '')
+    return f"{func.__module__}.{func.__qualname__}".replace(".<locals>", "")
 
 
 class FilterHook:
     def __call__(self, runner, func):
-        f = runner.option_get('filter', '')
+        f = runner.option_get("filter", "")
         if f in fullname(func):
             return func
 
@@ -36,47 +36,54 @@ class FilterHook:
         record.msg = fullname(func)
         return record
 
+
 filter_hook = FilterHook()
 
 
 def filter_test(self_test):
     my_test = self_test(hooks=[filter_hook])
+
     @my_test
     def hook_but_no_filter_given():
         pass
+
     @my_test
     def aap_mies():
-        with my_test.child(filter='noot') as with_noot:
+        with my_test.child(filter="noot") as with_noot:
             r = [0, 0, 0]
+
             class aap:
                 @with_noot
                 def aap():
                     r[0] = 1
+
                 @with_noot
                 def noot():
                     r[1] = 1
+
                     @with_noot
                     def mies():
                         r[2] = 1
+
             assert r == [0, 1, 1], r
-        assert {'found': 3, 'run': 2} == with_noot.stats, with_noot.stats
+        assert {"found": 3, "run": 2} == with_noot.stats, with_noot.stats
 
     @my_test
     def remove_locals():
         r = [0]
-        @my_test(filter='remove_locals.vuur')
+
+        @my_test(filter="remove_locals.vuur")
         def vuur():
             r[0] = 1
+
         assert r == [1], r
 
     @my_test
     def filter_on_module():
         r = [0]
-        @my_test(filter='autotest.filter.filter_test.filter_on_module.boom')
+
+        @my_test(filter="autotest.filter.filter_test.filter_on_module.boom")
         def boom():
             r[0] = 1
+
         assert r == [1], r
-
-
-
-

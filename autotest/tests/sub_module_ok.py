@@ -25,6 +25,7 @@ import autotest
 
 test = autotest.get_tester(__name__)
 
+
 @test
 def test_one():
     print("TESTER:", test)

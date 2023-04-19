@@ -25,9 +25,11 @@ import autotest
 
 test = autotest.get_tester(__name__).getChild(subprocess=True)
 
+
 @test
 def one_simple_test():
     test.eq(1, 1)
+
 
 @test.integration
 async def one_more_test():

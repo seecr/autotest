@@ -25,6 +25,7 @@ import autotest
 
 test = autotest.get_tester(__name__)
 
+
 @test
 def tiedeldom():
     assert 42 == 43, "fail I will"

@@ -24,18 +24,18 @@
 
 # This works:
 
-def f():
 
+def f():
     def g():
         print("g(1)")
 
     g()
 
+
 f()
 
 
 def f():
-
     def g():
         print("g(2)")
 
@@ -44,13 +44,14 @@ def f():
 
     h()
 
+
 f()
 
 
 # This also works:
 
-class f():
 
+class f:
     def g():
         print("g(3)")
 
@@ -59,13 +60,13 @@ class f():
 
 # but this does not:
 
-class f():
 
+class f:
     def g():
         print("g(4)")
 
     def h():
-        g() # "g is not defined"
+        g()  # "g is not defined"
 
     h()
 

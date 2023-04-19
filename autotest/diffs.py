@@ -21,49 +21,43 @@
 #
 ## end license ##
 
-import difflib          # show diffs on failed tests with two args
-import pprint           # show diffs on failed tests with two args
+import difflib  # show diffs on failed tests with two args
+import pprint  # show diffs on failed tests with two args
 import functools
 import inspect
 from .prrint import prrint, format as forrmat
 
 
 def diff(a, b, format=pprint.pformat):
-    """ Produces diff of textual representation of a and b. """
-    return '\n' + '\n'.join(
-                difflib.ndiff(
-                    format(a).splitlines(),
-                    format(b).splitlines()))
+    """Produces diff of textual representation of a and b."""
+    return "\n" + "\n".join(
+        difflib.ndiff(format(a).splitlines(), format(b).splitlines())
+    )
 
 
 def diff2(a, b):
-    """ diff based on own prrint; suitable for PODs """
+    """diff based on own prrint; suitable for PODs"""
     return diff(a, b, format=forrmat)
 
 
-
 class DiffHook:
-
     def __call__(self, runner, func):
         return func
 
-
     def lookup(self, runner, name):
-        if name == 'diff':
+        if name == "diff":
             return diff
-        if name == 'diff2':
+        if name == "diff2":
             return diff2
-        if name == 'prrint':
+        if name == "prrint":
             return prrint
         raise AttributeError
-
 
 
 diff_hook = DiffHook()
 
 
-def  diff_test(self_test):
-
+def diff_test(self_test):
     self_test = self_test.getChild(hooks=[diff_hook])
 
     @self_test
@@ -76,7 +70,7 @@ def  diff_test(self_test):
         assert str == type(str(d))
 
         try:
-            assert a == b, self_test.diff(a,b)
+            assert a == b, self_test.diff(a, b)
         except AssertionError as e:
             assert """
 - [7, 1, 2, 8, 3, 4]
@@ -84,8 +78,9 @@ def  diff_test(self_test):
 
 + [1, 2, 9, 3, 4, 6]
 ?        ^      +++
-""" == str(e)
-
+""" == str(
+                e
+            )
 
         try:
             self_test.eq(a, b, diff=self_test.diff)
@@ -96,8 +91,9 @@ def  diff_test(self_test):
 
 + [1, 2, 9, 3, 4, 6]
 ?        ^      +++
-""" == str(e), e
-
+""" == str(
+                e
+            ), e
 
         # use of a function from elswhere
         a = set([7, 1, 2, 8, 3, 4])
@@ -110,7 +106,6 @@ def  diff_test(self_test):
             self_test.eq(a, b, diff=set.symmetric_difference)
         except AssertionError as e:
             assert "{6, 7, 8, 9}" == str(e), e
-
 
     @self_test
     def diff2_sorting_including_uncomparables():
@@ -129,4 +124,3 @@ def  diff_test(self_test):
             self_test.eq({dict: bool}, {str, 1}, diff=self_test.diff2)
         except AssertionError as e:
             assert msg == str(e), e
-
