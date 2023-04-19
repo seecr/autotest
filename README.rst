@@ -227,7 +227,7 @@ Log the current value of the statistics to the configured output. The actual log
 Core Options
 ------------
 
-The core knows three options. Hooks may support additional options. Options can be given to any of these calls:
+The core knows four options. Hooks may support additional options. Options can be given to any of these calls:
 
 - ``basic_config(**options)``,
 - ``__call__(**options)``,
