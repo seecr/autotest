@@ -1,0 +1,37 @@
+
+[build-system]
+requires = ["setuptools>=61.0.0", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "selftest"
+version = "1.0.0"
+description = "Allows programs to test itself, during development or later."
+readme = "README.rst"
+authors = [
+    { name = "Thijs Janssen", email = "thijs@seecr.nl"},
+    { name = "Erik Groeneveld", email = "erik@seecr.nl"}
+]
+license = { file = "LICENSE" }
+
+
+classifiers = [
+    'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+    'Topic :: Software Development :: Testing',
+    'Topic :: Software Development :: Testing :: Unit',
+'   Programming Language :: Python :: 3',
+]
+
+
+keywords = [ "test", "unittest", "selftest" ]
+dependencies = []
+requires-python = ">=3.9"
+
+
+[project.urls]
+Homepage = "https://github.com/seecr/autotest"
+
+
+[project.scripts]
+autotest = "autotest.__main__:main"

@@ -1,2 +1,2 @@
-include *.py sub_autotest/*.py LICENSE
+include *.py LICENSE
 
