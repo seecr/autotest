@@ -5,20 +5,23 @@ Autotest
 1. Introduction
 ===============
 
-A Simpler Pythonic Test Tool
-----------------------------
+A Simple Pythonic Self Test Tool
+--------------------------------
 
-Autotest is a simple and extensible test tool for Python. The key differences are:
+Autotest is a simple and extensible test tool for Python. Here `auto` means `self`. The key features are:
 
-- tests are *ordinary functions* and are part of the application code,
-- gathering tests is *automatic* and follows the structure of your code,
-- supports test *levels* and *filtering*
+- tests are *ordinary functions*, anywhere in the application code,
+- gathering and running tests is *automatic* and follows the structure of your code,
 - testing *stops on first failure* with a standard Python stack trace,
-- *asyncio* fully supported.
 
-**Test Dependencies**
+The benefit of this approach are:
 
-The most prominent feature is that it automatically tests everything your code *actually* depends on, across modules, packages and projects. This results in running less tests when working on a submodule and, when developing projects in conjunction, you need not run all their test suites after a change (and forget one).
+- there is no seprate test tree to maintain,
+- dependencies are automatically tested,
+- quicker cycles, more focus.
+
+The core is extremely small and support for `async`, `filters`, `operators`, `fixtures`, `diffs`, `wildcards`, `guards`, etc are all implemented in `hooks`.
+
 
 History
 -------
@@ -46,12 +49,13 @@ Features
 Meanwhile autotest gained some features. It
 
 #) works in a familiar *Pythonic* way, no magic,
+#) has one simple *API* via the test object,
 #) is based on *standard modules* operator, pdb, logger, difflib, inspect, etc,
 #) seamlessly scales from *microtests* to *systemtests*,
-#) discovers tests through the *importing mechanism*,
+#) discovers tests automatically through the *importing mechanism*,
 #) crosses module, package and project boundaries easily,
 #) *makes refactoring easier*, even across projects, tests just move with code,
-#) executes tests *immediately* after discovery,
+#) executes tests *immediately* after discovery, in well-defined order,
 #) *stops on first failure*, fits into a fast REPL-style way of working,
 #) supports *levels*: unit, integration, performance etc.,
 #) there are *fixtures* (context managers) like in other test tools,
@@ -422,6 +426,7 @@ There are standard fixtures for:
 #) stderr - captures ``sys.stderr``, including that of subprocesses, in a ``StringIO``,
 #) tmp_path:subpath - creates a temporary ``pathlib.Path`` object, optionally with a subpath,
 #) raises:(Exception, message) - raises AssertionError if given code does not raise given exception with given message,
+#) guard - isolates tests by saving and restoring sys.path, sys.meta_path, and sys.modules.
 
 An example for using ``raises()`` in two different ways:
 
