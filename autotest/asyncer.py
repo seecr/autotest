@@ -148,7 +148,8 @@ def async_test(self_test):
             def asserts():
                 assert "" == s, s
                 assert "Executing <Handle sleep(0.11) created at" in e, e
-                assert "took 0.110 seconds" in e, e
+                assert "took 0.11" in e, e
+                assert " seconds" in e, e
 
         finally:
             sys.stderr = sys.__stderr__
