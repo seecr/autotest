@@ -21,11 +21,17 @@
 #
 ## end license ##
 
-import autotest
+import selftest
 
-test = autotest.get_tester(__name__)
+test = selftest.get_tester(__name__).getChild(subprocess=True)
 
 
 @test
-def tiedeldom():
-    assert 42 == 43, "fail I will"
+def one_simple_test():
+    test.eq(1, 1)
+
+
+@test.integration
+async def one_more_test():
+    assert 1 == 2, "one is not two"
+    test.eq(1, 2)

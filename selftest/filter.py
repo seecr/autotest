@@ -82,7 +82,7 @@ def filter_test(self_test):
     def filter_on_module():
         r = [0]
 
-        @my_test(filter="autotest.filter.filter_test.filter_on_module.boom")
+        @my_test(filter="selftest.filter.filter_test.filter_on_module.boom")
         def boom():
             r[0] = 1
 

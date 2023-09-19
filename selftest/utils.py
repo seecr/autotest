@@ -102,9 +102,9 @@ std_modules = sys.builtin_module_names + (
     "asyncio.runners",
     "asyncio.base_events",
     "asyncio.tasks",
-    #'autotest',
-    #'autotest.binder',
-    "autotest.fixtures",
+    #'selftest',
+    #'selftest.binder',
+    "selftest.fixtures",
     "importlib",
 )
 
@@ -117,7 +117,7 @@ def is_builtin(f):
 def is_internal(frame):
     nm = frame.f_code.co_filename
     return (
-        "AUTOTEST_INTERNAL" in frame.f_code.co_varnames
+        "SELFTEST_INTERNAL" in frame.f_code.co_varnames
         or "<frozen importlib" in nm
         or is_builtin(frame)
     )  # TODO testme
@@ -211,20 +211,20 @@ def filter_traceback(root):
 # @self_test2   #TODO
 def trace_backfiltering():
     def eq(a, b):
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         assert a == b
 
     def B():
         eq(1, 2)
 
     def B_in_betwixt():
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         B()
 
     def A():
         B_in_betwixt()
 
-    self_test2.contains(B_in_betwixt.__code__.co_varnames, "AUTOTEST_INTERNAL")
+    self_test2.contains(B_in_betwixt.__code__.co_varnames, "SELFTEST_INTERNAL")
 
     def test_names(*should):
         _, _, tb = sys.exc_info()
@@ -260,11 +260,11 @@ def trace_backfiltering():
         A()
 
     def D():
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         C()
 
     def E():
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         D()
 
     try:

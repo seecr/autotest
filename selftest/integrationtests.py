@@ -40,14 +40,14 @@ def fork(f):
 
 
 def subprocess():
-    """when spawned, imports autotest freshly, potentially running al tests
+    """when spawned, imports selftest freshly, potentially running al tests
         but this is prevented by default, use subprocess=True when needed
-    when forked, use existing loaded autotest, not running tests
+    when forked, use existing loaded selftest, not running tests
         so no special measures are taken and both tests run
     """
-    import autotest
+    import selftest
 
-    test = autotest.get_tester("subprocess")
+    test = selftest.get_tester("subprocess")
 
     @test
     def one_test_not_run():
@@ -61,10 +61,10 @@ def subprocess():
 def integration_test(test):
     @test
     def import_submodule(stdout, stderr):
-        from autotest.tests.sub_module_ok import marker
+        from selftest.tests.sub_module_ok import marker
 
-        test.eq("TESTER: <Tester 'autotest.tests.sub_module_ok'>\n", stdout.getvalue())
-        test.eq("UNIT:autotest.tests.sub_module_ok.test_one\n", stderr.getvalue())
+        test.eq("TESTER: <Tester 'selftest.tests.sub_module_ok'>\n", stdout.getvalue())
+        test.eq("UNIT:selftest.tests.sub_module_ok.test_one\n", stderr.getvalue())
 
     try:
         with test.stdout as s, test.stderr as r:
@@ -79,7 +79,7 @@ def integration_test(test):
         m = r.getvalue()
         test.eq(
             m,
-            "INTEGRATION:autotest.integrationtests.integration_test.import_submodule_failure\nUNIT:autotest.tests.sub_module_fail.tiedeldom\n",
+            "INTEGRATION:selftest.integrationtests.integration_test.import_submodule_failure\nUNIT:selftest.tests.sub_module_fail.tiedeldom\n",
         )
 
     with test.raises(AssertionError, "Use combine:3 instead of combine=3"):

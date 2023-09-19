@@ -32,7 +32,7 @@ long_description = (here / "README.rst").read_text(encoding="utf-8")
 version = "0.2.0"
 
 setup(
-    name="autotest",
+    name="selftest",
     version=version,
     description="Python Testing Library",
     long_description=long_description,
@@ -40,8 +40,8 @@ setup(
     packages=find_packages(),
     author="Erik Groeneveld",
     author_email="erik@seecr.nl",
-    url="https://github.com/seecr/autotest",
-    scripts=["bin/autotest"],
+    url="https://github.com/seecr/selftest",
+    scripts=["bin/selftest"],
     classifiers=[
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Topic :: Software Development :: Testing",

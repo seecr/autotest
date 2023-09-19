@@ -37,12 +37,12 @@ thread = concurrent.futures.ThreadPoolExecutor(max_workers=10).submit
 
 def async_hook(runner, func):
     def may_be_async(*a, **k):
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         coro_or_result = func(*a, **k)
         if inspect.iscoroutine(coro_or_result):
 
             async def with_options():
-                AUTOTEST_INTERNAL = 1
+                SELFTEST_INTERNAL = 1
                 try:
                     if scbd := runner.option_get("slow_callback_duration"):
                         asyncio.get_running_loop().slow_callback_duration = scbd

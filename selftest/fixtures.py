@@ -92,7 +92,7 @@ class _Fixtures:
         raise AttributeError
 
     def __call__(self, *args, **kwds):
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         if inspect.iscoroutinefunction(self.func):
             return self.async_run_with_fixtures(*args, **kwds)
         else:
@@ -101,7 +101,7 @@ class _Fixtures:
 
     def get_fixtures_except_for(self, f, except_for):
         """Finds all fixtures, skips those in except_for (overridden fixtures)"""
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
 
         def args(p):
             a = () if p.annotation == inspect.Parameter.empty else p.annotation
@@ -119,7 +119,7 @@ class _Fixtures:
     # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
     def run_recursively(self, f, contextmgrstack, *args, **kwds):
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         fixture_values = []
         for fx, fx_args in self.get_fixtures_except_for(f, kwds.keys()):
             assert inspect.isgeneratorfunction(
@@ -133,7 +133,7 @@ class _Fixtures:
     # compare ^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v^v and test
 
     async def async_run_recursively(self, f, contextmgrstack, *args, **kwds):
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         fixture_values = []
         for fx, fx_args in self.get_fixtures_except_for(f, kwds.keys()):
             ctxmgr_func = contextlib.asynccontextmanager(
@@ -150,7 +150,7 @@ class _Fixtures:
     # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     async def async_run_with_fixtures(self, *args, **kwargs):
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         async with contextlib.AsyncExitStack() as contextmgrstack:
             result = await self.async_run_recursively(
                 self.func, contextmgrstack, *args, **kwargs

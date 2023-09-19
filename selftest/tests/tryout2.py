@@ -1,10 +1,8 @@
-#!/usr/bin/env python3
-
 ## begin license ##
 #
 # "Autotest": a simpler test runner for python
 #
-# Copyright (C) 2021-2022 Seecr (Seek You Too B.V.) https://seecr.nl
+# Copyright (C) 2022 Seecr (Seek You Too B.V.) https://seecr.nl
 #
 # This file is part of "Autotest"
 #
@@ -23,13 +21,21 @@
 #
 ## end license ##
 
-import sys
-import pathlib
+import selftest
 
-mypath = pathlib.Path(__file__).parent.resolve()
-if (mypath.parent/'autotest/__init__.py').exists():
-    sys.path.insert(0, mypath.parent.as_posix())
+test = selftest.get_tester(__name__).getChild(subprocess=True)
 
-import runpy
-runpy.run_module('autotest')
 
+@test
+def one_simple_test():
+    test.eq(1, 1)
+
+
+@test.integration
+def one_integration_test():
+    test.eq(1, 1)
+
+
+@test.performance
+def one_performance_test():
+    test.eq(1, 1)

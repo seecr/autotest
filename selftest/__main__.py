@@ -24,7 +24,7 @@
 import pdb
 import sys
 import logging
-import autotest
+import selftest
 import importlib
 import pathlib
 import optparse
@@ -33,16 +33,16 @@ import os.path
 
 
 """
-Runs autotests reporting to stdout.
+Runs selftests reporting to stdout.
 
 Usage:
-  $ autotest <path or module>
+  $ selftest <path or module>
 
 """
 
-if "AUTOTEST_MAIN" not in os.environ:
+if "SELFTEST_MAIN" not in os.environ:
     # avoid running main twice (during import in a spawned process)
-    os.environ["AUTOTEST_MAIN"] = "Y"
+    os.environ["SELFTEST_MAIN"] = "Y"
 
     def post_mortem(tb, *cmds):
         """for when you use plain assert, it'll throw you in Pdb on failure"""
@@ -67,7 +67,7 @@ if "AUTOTEST_MAIN" not in os.environ:
     sys.path.insert(0, cwd.as_posix())
 
     insert_excepthook(code_print_excepthook)
-    insert_excepthook(lambda t, v, tb: (t, v, autotest.utils.filter_traceback(tb)))
+    insert_excepthook(lambda t, v, tb: (t, v, selftest.utils.filter_traceback(tb)))
 
     p = optparse.OptionParser(usage="usage: %prog [options] module")
     p.add_option(
@@ -78,7 +78,7 @@ if "AUTOTEST_MAIN" not in os.environ:
         "--threshold",
         help="only run tests whose level is >= THRESHOLD",
         choices=[
-            l.lower() for l in autotest.levels.levels.keys() if isinstance(l, str)
+            l.lower() for l in selftest.levels.levels.keys() if isinstance(l, str)
         ],
     )
     options, args = p.parse_args()
@@ -87,7 +87,7 @@ if "AUTOTEST_MAIN" not in os.environ:
     if f := options.filter:
         test_options["filter"] = f
     test_options["threshold"] = options.threshold or "integration"
-    autotest.basic_config(**test_options)
+    selftest.basic_config(**test_options)
 
     class F(str):
         def format(self, *, levelname="", message="", lineno="", pathname="", **rest):
@@ -96,12 +96,12 @@ if "AUTOTEST_MAIN" not in os.environ:
 
     logging.basicConfig(style="{", format=F("{fake}"))
 
-    root = autotest.get_tester()
+    root = selftest.get_tester()
     if len(args) == 1:
         p = pathlib.Path(args[0])
         modulename = ".".join(p.parent.parts + (p.stem,))
-        logging.getLogger("autotest").log(
-            autotest.tester.default_loglevel, f"importing {modulename}"
+        logging.getLogger("selftest").log(
+            selftest.tester.default_loglevel, f"importing {modulename}"
         )
         importlib.import_module(modulename)
         root.log_stats()

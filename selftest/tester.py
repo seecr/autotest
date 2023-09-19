@@ -45,7 +45,7 @@ import sys  # maxsize
 import io  # formatting tests
 
 
-logger = logging.getLogger("autotest")
+logger = logging.getLogger("selftest")
 # in order to have tests shown when logging is unconfigured, we log at a level slightly
 # higher than the default level WARNING (30)
 default_loglevel = 33
@@ -57,8 +57,8 @@ logging.addLevelName(default_loglevel, "TEST")  # TODO make configurable
     Use subprocess=True when needed.
     This is NOT the same as preventing __main__ from running multiple times!
 """
-is_subprocess = "AUTOTEST_PARENT" in os.environ
-os.environ["AUTOTEST_PARENT"] = "Y"
+is_subprocess = "SELFTEST_PARENT" in os.environ
+os.environ["SELFTEST_PARENT"] = "Y"
 
 
 defaults = dict(
@@ -73,7 +73,7 @@ class Tester:
 
     def __call__(self, *functions, **options):
         """Runs tests, with options; useful as decorator."""
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         if functions and options:
             return self(**options)(*functions)
         if options:
@@ -95,7 +95,7 @@ class Tester:
         raise AssertionError(*args, *(kwds,) if kwds else ())
 
     def __init__(self, name=None, parent=None, **options):
-        """Not to be instantiated directly, use autotest.getTester() instead"""
+        """Not to be instantiated directly, use selftest.getTester() instead"""
         self._parent = parent
         if parent:
             self._name = (
@@ -160,7 +160,7 @@ class Tester:
 
     def _run(self, test_func, *app_args, **app_kwds):
         """Runs hooks and and runs result."""
-        AUTOTEST_INTERNAL = 1
+        SELFTEST_INTERNAL = 1
         self._stat("found")
         orig_test_func = test_func
         if not is_subprocess or self.option_get("subprocess", False):
@@ -211,10 +211,10 @@ from .levels import levels_hook
 
 from sys import argv
 
-if "autotest.selftest" in argv:
-    argv.remove("autotest.selftest")
+if "selftest.selftest" in argv:
+    argv.remove("selftest.selftest")
     self_test = Tester(
-        "autotest-self-tests", hooks=(operators_hook, levels_hook), level="unit"
+        "selftest-self-tests", hooks=(operators_hook, levels_hook), level="unit"
     )  # separate runner for bootstrapping/self testing
 else:
 
@@ -359,15 +359,15 @@ def intercept():
 
 @contextlib.contextmanager
 def configure_stream_hander():
-    autotest_logger = logging.getLogger("autotest")
+    selftest_logger = logging.getLogger("selftest")
     s = io.StringIO()
     handler = logging.StreamHandler(s)
     handler.setFormatter(logging.Formatter(fmt=logging._STYLES["%"][1]))
-    autotest_logger.addHandler(handler)
+    selftest_logger.addHandler(handler)
     try:
         yield s
     finally:
-        autotest_logger.removeHandler(handler)
+        selftest_logger.removeHandler(handler)
 
 
 class logging_handlers:
@@ -412,8 +412,8 @@ class logging_handlers:
                 "UNIT:logging_handlers.logrecords_contents.<locals>.a_test",
                 records[0].msg,
             )
-            self_test.eq("autotest.unconfigured_logging", records[0].name)
-            self_test.endswith(records[0].pathname, "autotest/autotest/tester.py")
+            self_test.eq("selftest.unconfigured_logging", records[0].name)
+            self_test.endswith(records[0].pathname, "selftest/selftest/tester.py")
             self_test.truth(2 < records[0].process < 100000)
             self_test.eq("MainProcess", records[0].processName)
             self_test.truth(1 < records[0].relativeCreated < 1000)
@@ -433,7 +433,7 @@ class logging_handlers:
                 assert 1 == 1  # hooks for operators not present
 
             self_test.eq(
-                "TEST:autotest.default_formatting:UNIT:logging_handlers.tester_with_default_formatting.<locals>.a_test\n",
+                "TEST:selftest.default_formatting:UNIT:logging_handlers.tester_with_default_formatting.<locals>.a_test\n",
                 s.getvalue(),
             )
 
@@ -447,7 +447,7 @@ class logging_handlers:
                 assert 1 == 1  # hooks for operators not present
 
             self_test.eq(
-                "TEST:autotest:UNIT:logging_handlers.tester_without_a_name.<locals>.a_test\n",
+                "TEST:selftest:UNIT:logging_handlers.tester_without_a_name.<locals>.a_test\n",
                 s.getvalue(),
             )
 
@@ -472,15 +472,15 @@ class logging_handlers:
 
             loglines = s.getvalue().splitlines()
             self_test.eq(
-                "TEST:autotest.main.sub1:UNIT:logging_handlers.sub_tester.<locals>.sub1_test",
+                "TEST:selftest.main.sub1:UNIT:logging_handlers.sub_tester.<locals>.sub1_test",
                 loglines[0],
             )
             self_test.eq(
-                "TEST:autotest.main:UNIT:logging_handlers.sub_tester.<locals>.main_test",
+                "TEST:selftest.main:UNIT:logging_handlers.sub_tester.<locals>.main_test",
                 loglines[1],
             )
             self_test.eq(
-                "TEST:autotest.main.sub1.sub2:UNIT:logging_handlers.sub_tester.<locals>.sub2_test",
+                "TEST:selftest.main.sub1.sub2:UNIT:logging_handlers.sub_tester.<locals>.sub2_test",
                 loglines[2],
             )
 
@@ -497,7 +497,7 @@ class logging_handlers:
             except AssertionError:
                 pass
             self_test.eq(
-                "TEST:autotest.main:UNIT:logging_handlers.tester_with_handler_failing.<locals>.a_failing_test\n",
+                "TEST:selftest.main:UNIT:logging_handlers.tester_with_handler_failing.<locals>.a_failing_test\n",
                 s.getvalue(),
             )
 

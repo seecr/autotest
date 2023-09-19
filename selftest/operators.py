@@ -41,7 +41,7 @@ class _Operators:
 
         def call_operator(*oargs, diff=None):
             args = oargs  # TODO test
-            AUTOTEST_INTERNAL = 1
+            SELFTEST_INTERNAL = 1
             if hasattr(operator, name):
                 op = getattr(operator, name)
             elif hasattr(builtins, name):
