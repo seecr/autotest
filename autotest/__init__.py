@@ -384,12 +384,12 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
 
     @self_test2
     def main_without_args(stdout):
-        os.system("PYTHONPATH=. python autotest")
+        os.system("PYTHONPATH=. python3 autotest")
         assert "Usage: autotest [options] module" in stdout.getvalue()
 
     @self_test2
     def main_without_help(stdout):
-        os.system("PYTHONPATH=. python autotest --help")
+        os.system("PYTHONPATH=. python3 autotest --help")
         s = stdout.getvalue()
         assert "Usage: autotest [options] module" in s
         assert "-h, --help            show this help message and exit" in s
@@ -402,7 +402,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
     def main_test(stderr, stdout):
         import os
 
-        os.system("PYTHONPATH=. python autotest autotest/tests/tryout.py")
+        os.system("PYTHONPATH=. python3 autotest autotest/tests/tryout.py")
         e = stderr.getvalue()
         s = stdout.getvalue()
         assert "" == s, s
@@ -437,7 +437,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
 
     # @self_test2
     def main_with_selftests(stdout, stderr):
-        os.system("PYTHONPATH=. python autotest autotest.selftest")
+        os.system("PYTHONPATH=. python3 autotest autotest.selftest")
         lns = stdout.getvalue().splitlines()
         assert ["Usage: autotest [options] module", ""] == lns, lns
         lns = stderr.getvalue().splitlines()
@@ -476,7 +476,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
     @self_test2
     def main_with_filter(stdout, stderr):
         os.system(
-            "PYTHONPATH=. python autotest autotest/tests/tryout2.py --filter one_simple"
+            "PYTHONPATH=. python3 autotest autotest/tests/tryout2.py --filter one_simple"
         )
         o = stdout.getvalue()
         assert "" == o, o
@@ -489,7 +489,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
     @self_test2
     def main_with_level_unit(stdout, stderr):
         os.system(
-            "PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold unit"
+            "PYTHONPATH=. python3 autotest autotest/tests/tryout2.py --threshold unit"
         )
         o = stdout.getvalue()
         assert "" == o, o
@@ -502,7 +502,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
     @self_test2
     def main_with_level_integration(stdout, stderr):
         os.system(
-            "PYTHONPATH=. python autotest autotest/tests/tryout2.py --threshold integration"
+            "PYTHONPATH=. python3 autotest autotest/tests/tryout2.py --threshold integration"
         )
         o = stdout.getvalue()
         assert "" == o, o
