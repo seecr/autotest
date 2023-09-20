@@ -40,9 +40,12 @@ setup(
     packages=find_packages(),
     author="Erik Groeneveld",
     author_email="erik@seecr.nl",
+    maintainer="Thijs Janssen",
+    maintainer_email="thijs@seecr.nl",
     url="https://github.com/seecr/selftest",
     scripts=["bin/selftest"],
     classifiers=[
+        "Development Status :: 5 - Production/Stable",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Topic :: Software Development :: Testing",
         "Topic :: Software Development :: Testing :: Unit",
