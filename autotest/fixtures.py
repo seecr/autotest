@@ -243,6 +243,16 @@ def guard():
 std_fixtures = {fx.__name__: fx for fx in [tmp_path, stdout, stderr, raises, guard]}
 
 
+def capture_stdout_child_processes_spawn_f():
+    from autotest import get_tester
+    self_test = get_tester(__name__)
+
+    @self_test(subprocess=True)
+    def in_child():
+        print("hier ben ik")
+        assert 1 == 1
+
+
 def fixtures_test(self_test):
     from .binder import binder_hook
 
@@ -341,14 +351,18 @@ def fixtures_test(self_test):
     @self_test
     def capture_stdout_child_processes(stdout):
         import multiprocessing
-
         def f():
             @self_test(child=True)
             def in_child():
                 print("hier ben ik")
                 assert 1 == 1
+        target = f
 
-        p = multiprocessing.Process(target=f)  # NB: forks
+        if multiprocessing.get_start_method() != 'fork':
+            target = capture_stdout_child_processes_spawn_f
+
+
+        p = multiprocessing.Process(target=target)
         p.start()
         p.join(1)
         s = stdout.getvalue()
