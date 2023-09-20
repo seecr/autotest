@@ -36,7 +36,7 @@ from .utils import extend_closure
 from .utils import ArgsCollectingContextManager, ArgsCollectingAsyncContextManager
 
 
-__all__ = ["Fixtures", "testing_fixtures", "std_fixtures"]
+__all__ = ["std_fixtures"]
 
 
 def get_fixture(runner, name):
