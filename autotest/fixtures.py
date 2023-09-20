@@ -352,7 +352,7 @@ def fixtures_test(self_test):
     def capture_stdout_child_processes(stdout):
         import multiprocessing
         def f():
-            @self_test(child=True)
+            @self_test
             def in_child():
                 print("hier ben ik")
                 assert 1 == 1
