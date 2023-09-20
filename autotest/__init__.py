@@ -406,7 +406,7 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         e = stderr.getvalue()
         s = stdout.getvalue()
         assert "" == s, s
-        loglines = e.splitlines()
+        loglines = [l for l in e.splitlines() if not '^^^^' in l]
         assert "importing autotest.tests.tryout" in loglines[0], loglines[0]
         assert loglines[1].startswith(
             "\033[1mTEST\033[0m:\033[1mUNIT:autotest.tests.tryout.one_simple_test\033[0m:"
@@ -426,14 +426,20 @@ with self_test.child(hooks=[fixtures_hook], fixtures=std_fixtures) as self_test2
         assert "[EOF]" == loglines[10]
         assert "Traceback (most recent call last):" in loglines[11]
         # some stuff in between we can't get rid off
+        #
+        import sys
         assert "in <module>" in loglines[-5]
         assert "autotest/tests/tryout.py" in loglines[-5]
-        assert "async def one_more_test():" in loglines[-4]
+        if sys.version_info.minor < 11:
+            assert "async def one_more_test():" in loglines[-4], '\n'.join(loglines[-5:])
         assert "in one_more_test" in loglines[-3]
         assert "autotest/tests/tryout.py" in loglines[-3]
         assert "assert 1 == 2" in loglines[-2]
         assert "AssertionError: one is not two" in loglines[-1], loglines[-1]
-        assert 23 == len(loglines), "\n".join(repr(l) for l in loglines)
+        expected_length = 21
+        if sys.version_info.minor < 11:
+            expected_length = 23
+        assert expected_length == len(loglines), f'{len(loglines)} ' + "\n".join(repr(l) for l in loglines)
 
     # @self_test2
     def main_with_selftests(stdout, stderr):
