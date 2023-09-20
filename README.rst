@@ -1,5 +1,8 @@
+.. image:: https://github.com/seecr/selftest/actions/workflows/python-package.yml/badge.svg
+   :alt: Python Package Check
+
 ========
-Autotest
+Selftest
 ========
 
 1. Introduction
@@ -8,7 +11,7 @@ Autotest
 A Simple Pythonic Self Test Tool
 --------------------------------
 
-Autotest is a simple and extensible test tool for Python. Here `auto` means `self`. The key features are:
+Selftest is a simple and extensible test tool for Python. Selftest was first known as Autotest where `auto` means `self`. The key features are:
 
 - tests are *ordinary functions*, anywhere in the application code,
 - gathering and running tests is *automatic* and follows the structure of your code,
@@ -25,7 +28,7 @@ The core is extremely small and support for `async`, `filters`, `operators`, `fi
 
 History
 -------
-Autotest began, as a recalcitrant move away from the frameworks, with the following decorator above my tests:
+Selftest began, as a recalcitrant move away from the frameworks, with the following decorator above my tests:
 
 .. code:: python
 
@@ -41,6 +44,8 @@ Autotest began, as a recalcitrant move away from the frameworks, with the follow
       assert 42 == i_need_testing(42)
 
 It would just run the test every time I imported it. That turned out to work so well that it grew out to what we have here today.
+
+Selftest was first named Autotest, due to conflicting names in the Python Package Index it was renamed to Selftest.
 
 
 Features
@@ -71,7 +76,7 @@ Although autotest promotes an agile, rigorous and Pythonic way of testing, since
 An example
 ----------
 
-Autotest has a global root tester that can have an arbitrarily deep and wide tree of child testers. A typical module uses it as follows:
+Selftest has a global root tester that can have an arbitrarily deep and wide tree of child testers. A typical module uses it as follows:
 
 .. code:: python
 
@@ -100,7 +105,7 @@ General
 
 **Tester objects**
 
-Autotest has a hierarchical tree of test runners called ``tester`` objects, a bit like Pythons logging facility. The main program is supposed to configure the root (although it doesn't have to) with various options. Testers lower in the tree can override these options.
+Selftest has a hierarchical tree of test runners called ``tester`` objects, a bit like Pythons logging facility. The main program is supposed to configure the root (although it doesn't have to) with various options. Testers lower in the tree can override these options.
 
 **Hooks**
 
@@ -269,7 +274,7 @@ Tests do not run in subprocesses which are spawned because the spawn method reim
 Hooks API
 ---------
 
-Hooks are callable objects, optionally also implementing ``lookup()``.  Autotest core only dispatches to the hooks and most useful functionality is implemented in standaard hooks.
+Hooks are callable objects, optionally also implementing ``lookup()``.  Selftest core only dispatches to the hooks and most useful functionality is implemented in standaard hooks.
 
 Installing a hook is done with the ``hooks`` option.
 
@@ -467,7 +472,7 @@ Diffs
 Hook ``diffs.py`` provides the attributes:
 
 - ``test.diff(a b)`` -- a Python ``pprint`` + ``difflib`` based general purpose diff for use with the operator hook,
-- ``test.diff2(a, b)`` -- an Autotest ``prrint`` + ``difflib`` based diff for ``Plain Old Data`` (POD) objects,
+- ``test.diff2(a, b)`` -- an Selftest ``prrint`` + ``difflib`` based diff for ``Plain Old Data`` (POD) objects,
 - ``test.prrint(a)`` -- a pretty printer for POD objects. Use instead of Pythons ``pprint()``.
 
 Diffs is included in the default root tester.
