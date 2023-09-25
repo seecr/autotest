@@ -22,6 +22,12 @@ The benefit of this approach are:
 
 The core is extremely small and support for `async`, `filters`, `operators`, `fixtures`, `diffs`, `wildcards`, `guards`, etc are all implemented in `hooks`.
 
+In-source testing
+-----------------
+Selttest runs tests within your source code along side the implementation, similar to Rust's module tests and Vitest in-source testing.
+
+This makes the tests share the same closure as the implementations and able to test against private states without exporting. Meanwhile, it also brings a closer feedback loop for development.
+
 
 History
 -------
