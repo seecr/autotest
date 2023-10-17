@@ -1,6 +1,9 @@
 .. image:: https://github.com/seecr/selftest/actions/workflows/python-package.yml/badge.svg
    :alt: Python Package Check
 
+.. image:: https://img.shields.io/badge/created_by-seecr-orange
+   :alt: Created by Seecr
+
 ========
 Selftest
 ========
