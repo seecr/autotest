@@ -2,6 +2,8 @@
 Autotest
 ========
 
+Project has been renamed to `Selftest <https://github.com/seecr/selftest>`_
+
 1. Introduction
 ===============
 
